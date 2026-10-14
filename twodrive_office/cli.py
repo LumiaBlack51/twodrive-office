@@ -13,7 +13,9 @@ def main():
     configure.add_argument("--mount-root")
     configure.add_argument("--copy-directory")
     sub.add_parser("status", help="检查设置和挂载（不显示凭据）")
-    sub.add_parser("serve", help="启动 ONLYOFFICE 的本地桥接服务")
+    serve = sub.add_parser("serve", help="启动 ONLYOFFICE 的本地桥接服务")
+    serve.add_argument("--idle-timeout", type=float, default=0,
+                       help="ONLYOFFICE 退出且没有请求后自动退出的秒数；0 为手动常驻")
     args = parser.parse_args()
     try:
         settings = Settings.load(args.config)
@@ -27,10 +29,22 @@ def main():
             print("设置已保存：", args.config)
         elif args.command == "serve":
             from .bridge import Bridge, make_server
-            server = make_server(Bridge(settings))
+            from .lifecycle import OfficePresence, activation_socket
+            if args.idle_timeout < 0:
+                raise SaveError("退出延迟不能为负数")
+            server = make_server(Bridge(settings), listener=activation_socket(settings.bridge_port))
             print(f"TwoDrive Office 本地服务：http://127.0.0.1:{settings.bridge_port}", flush=True)
             try:
-                server.serve_forever()
+                if args.idle_timeout:
+                    office = OfficePresence()
+                    server.timeout = 1
+                    while True:
+                        server.handle_request()
+                        if server.activity.idle(args.idle_timeout) and not office.running():
+                            print("ONLYOFFICE 已关闭，桥接服务按需退出", flush=True)
+                            break
+                else:
+                    server.serve_forever()
             except KeyboardInterrupt:
                 pass
             finally:

@@ -15,6 +15,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 from .policy import Settings, SaveError, SavePlan, atomic_write, check_source, fingerprint, normalized, plan_save
+from .lifecycle import Activity
 
 MAX_CONTENT = 128 * 1024 * 1024
 PLUGIN_ORIGINS = ("null", "file://", "onlyoffice://plugin")
@@ -141,7 +142,38 @@ class Bridge:
                     self.sessions.pop(key, None)
 
 
-def make_server(bridge: Bridge, port: int | None = None):
+class BridgeServer(ThreadingHTTPServer):
+    def __init__(self, *args, listener=None, **kwargs):
+        self.activity = Activity()
+        super().__init__(*args, bind_and_activate=listener is None, **kwargs)
+        if listener is not None:
+            self.socket.close()
+            self.socket = listener
+            self.server_address = listener.getsockname()
+            self.server_name, self.server_port = "localhost", self.server_address[1]
+
+    def get_request(self):
+        connection, address = super().get_request()
+        connection.settimeout(30)
+        return connection, address
+
+    def process_request(self, request, client_address):
+        # Count before spawning the handler so shutdown cannot race an accepted request.
+        self.activity.begin()
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self.activity.end()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self.activity.end()
+
+
+def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -171,8 +203,11 @@ def make_server(bridge: Bridge, port: int | None = None):
 
         def authorized(self):
             expected = "Bearer " + bridge.settings.bridge_token
-            return self.valid_origin() and self.trusted_host() and secrets.compare_digest(
+            allowed = self.valid_origin() and self.trusted_host() and secrets.compare_digest(
                 self.headers.get("Authorization", ""), expected)
+            if allowed:
+                self.server.activity.touch()
+            return allowed
 
         def do_OPTIONS(self):
             if not self.valid_origin() or not self.trusted_host():
@@ -240,7 +275,7 @@ def make_server(bridge: Bridge, port: int | None = None):
             bridge.close(self.path.removeprefix("/sessions/"))
             self.respond(200, {"status": "disabled"})
 
-    server = ThreadingHTTPServer(("127.0.0.1", bridge.settings.bridge_port if port is None else port), Handler)
+    server = BridgeServer(("127.0.0.1", bridge.settings.bridge_port if port is None else port), Handler, listener=listener)
     server.daemon_threads = True
     return server
 

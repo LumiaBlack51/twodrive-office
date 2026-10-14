@@ -6,7 +6,7 @@
 
 | 范围 | 实际结果 |
 | --- | --- |
-| 保存策略、桥接协议、回归用例 | 21 项 Python 测试通过：挂载断开、同名文档、符号链接、外部修改、原文件保护、加密/宏格式拒绝、缺失媒体拒绝、认证与原生 Origin、旧快照延迟返回时不能覆盖新版本等 |
+| 保存策略、桥接协议、回归用例 | 25 项 Python 测试通过：挂载断开、同名文档、符号链接、外部修改、原文件保护、加密/宏格式拒绝、缺失媒体拒绝、认证与原生 Origin、旧快照延迟返回时不能覆盖新版本、按需生命周期和继承监听 socket 等 |
 | ONLYOFFICE 调度 | 5 项 Node 测试通过：合并连续修改、最大延迟、失败重试、导出期间关闭、导出期间又有修改、避免重入和重复写入 |
 | LibreOffice 26.2.5.2 | `.oxt` 实际注册并加载于独立 profile。通过工具栏 dispatch → 真实修改事件 → UI 线程回调 → Writer 原位保存；关闭开关后停止；外部/未命名文档保存副本；检测副本外部冲突 |
 | LibreOffice Writer / Calc / Impress | 真实当前编辑内容分别导出至 ODT、XLSX、PPTX 副本，保留原文件字节、原 URL 和未保存标记；具体命令见下方 |
@@ -41,7 +41,11 @@ Flatpak 强制覆盖 `flatpak run --env` 传入的 DISPLAY/XDG 路径。第一�
 
 首次安装发现 systemd 不接受带字面双引号的 `WorkingDirectory`。安装脚本改为 `%h/.local/lib/twodrive-office`，在启动前验证 unit，并在报告成功前验证认证 HTTP 响应及实际活动状态，避免误报安装成功。脚本也为本地运行时和直接安装的插件保留 MIT 许可文件。
 
-`twodrive-office-bridge.service` 已启用且处于 `active/running`，Nice=10、I/O 优先级=7，仅监听 `127.0.0.1:19836`。原生插件 Origin 的认证请求通过，无凭据请求被拒绝；设置文件和连接文件权限为 0600。安装结束时没有 ONLYOFFICE 或 LibreOffice 编辑器进程；没有打开文档、开启自动保存或执行真实文件保存。
+初次安装时 `twodrive-office-bridge.service` 曾设置为登录自启动且处于 `active/running`，Nice=10、I/O 优先级=7，仅监听 `127.0.0.1:19836`。原生插件 Origin 的认证请求通过，无凭据请求被拒绝；设置文件和连接文件权限为 0600。安装结束时没有 ONLYOFFICE 或 LibreOffice 编辑器进程；没有打开文档、开启自动保存或执行真实文件保存。
+
+随后按用户要求取消了服务的登录自启动，改为 systemd socket activation。现在服务为 `static/inactive`、MainPID=0，只有现有 systemd 用户管理器保留启用的 loopback socket，不新增常驻 Python 或监控进程。ONLYOFFICE 插件的首次请求唤醒桥接；没有进行中的请求、最近认证请求超过 30 秒且当前用户的 ONLYOFFICE 进程已退出时，桥接正常退出。正在转换/保存的请求阻止退出；编辑器仍开着时保留会话，避免最小化或后台标签页的定时器节流导致会话丢失。LibreOffice 不需要桥接。
+
+已在本机真实服务单元上连续验证两轮“认证请求 → socket 唤醒新 Python 进程 → 无编辑器时自行退出 → 再次唤醒”；两轮均通过，最终 MainPID=0。新增回归覆盖长期请求不能被空闲退出打断、未认证流量不能重置空闲时间、只保留当前用户 ONLYOFFICE、继承监听 socket 和原生 CORS。此轮没有启动任何编辑器、没有打开用户文档，也没有写入 TwoDrive 文件。
 
 ## 重现命令
 
