@@ -35,8 +35,6 @@ Flatpak 强制覆盖 `flatpak run --env` 传入的 DISPLAY/XDG 路径。第一�
 
 后续测试关闭 X11/Wayland socket 权限，使用带随机认证 cookie 的 TCP Xvfb 显示。在交互前核实实际 DesktopEditors 进程的 DISPLAY、XDG_CONFIG_HOME、XDG_DATA_HOME、私有实例端口；去除正常会话管理/DBus 环境。清理只针对本次启动的进程组。重现脚本不会启动正常显示上的编辑器。
 
-## 重现
-
 ## 本机安装检查 · 2026-10-14
 
 经用户明确要求，插件现已安装到日常用户配置。LibreOffice 的 `org.twodrive.office.autosave` 0.1.0 及其 Python 组件、菜单配置均显示已注册；ONLYOFFICE 插件安装到 Flatpak 用户插件目录，文件及连接配置已核对。
