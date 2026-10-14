@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<oor:component-data xmlns:oor="http://openoffice.org/2001/registry" oor:name="Addons" oor:package="org.openoffice.Office">
+  <node oor:name="AddonUI">
+    <node oor:name="OfficeMenuBar"><node oor:name="org.twodrive.office.menu" oor:op="replace">
+      <prop oor:name="Title"><value xml:lang="en">TwoDrive</value></prop>
+      <node oor:name="Submenu">
+        <node oor:name="Toggle" oor:op="replace"><prop oor:name="URL"><value>twodrive:Toggle</value></prop><prop oor:name="Title"><value xml:lang="en">AutoSave on/off</value><value xml:lang="zh-CN">自动保存 开/关</value></prop></node>
+        <node oor:name="Choose" oor:op="replace"><prop oor:name="URL"><value>twodrive:ChooseDestination</value></prop><prop oor:name="Title"><value xml:lang="en">Choose copy folder…</value><value xml:lang="zh-CN">选择副本目录…</value></prop></node>
+        <node oor:name="Save" oor:op="replace"><prop oor:name="URL"><value>twodrive:SaveNow</value></prop><prop oor:name="Title"><value xml:lang="en">Save now</value><value xml:lang="zh-CN">立即保存</value></prop></node>
+        <node oor:name="Status" oor:op="replace"><prop oor:name="URL"><value>twodrive:Status</value></prop><prop oor:name="Title"><value xml:lang="en">Save status</value><value xml:lang="zh-CN">查看保存状态</value></prop></node>
+      </node>
+    </node></node>
+    <node oor:name="OfficeToolBar"><node oor:name="org.twodrive.office.toolbar" oor:op="replace">
+      <node oor:name="Toggle" oor:op="replace"><prop oor:name="URL"><value>twodrive:Toggle</value></prop><prop oor:name="Title"><value xml:lang="en">TwoDrive AutoSave</value><value xml:lang="zh-CN">TwoDrive 自动保存</value></prop><prop oor:name="ControlType"><value>ToggleButton</value></prop></node>
+      <node oor:name="Status" oor:op="replace"><prop oor:name="URL"><value>twodrive:Status</value></prop><prop oor:name="Title"><value xml:lang="en">Save status</value><value xml:lang="zh-CN">保存状态</value></prop></node>
+    </node></node>
+  </node>
+</oor:component-data>

@@ -1,0 +1,16 @@
+[project]
+name = "twodrive-office"
+version = "0.1.0"
+description = "TwoDrive AutoSave extensions for LibreOffice and ONLYOFFICE Desktop Editors"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+twodrive-office = "twodrive_office.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["twodrive_office"]

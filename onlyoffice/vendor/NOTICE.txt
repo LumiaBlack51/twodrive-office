@@ -1,0 +1,16 @@
+plugins.js is the ONLYOFFICE plugin SDK distributed at:
+https://onlyoffice.github.io/sdkjs-plugins/v1/plugins.js
+Copyright Ascensio System SIA. This unchanged SDK is bundled for offline
+plugin startup. Its own file header states GNU AGPL version 3 with additional
+notices and terms; that header is retained in full. See LICENSE.AGPL-3.0.
+
+Upstream SDK sources and build script:
+https://github.com/ONLYOFFICE/sdkjs/tree/master/common/plugins
+https://github.com/ONLYOFFICE/sdkjs/blob/master/common/plugins/plugin_base.js
+https://github.com/ONLYOFFICE/sdkjs/blob/master/common/plugins/plugin_base_api.js
+https://github.com/ONLYOFFICE/sdkjs/blob/master/common/plugins/make.py
+
+The Apache-2.0 LICENSE in the separate sdkjs-plugins example repository does
+not replace the AGPL notice in this bundled plugins.js file.
+The project's root MIT license applies to original TwoDrive Office code,
+not to this third-party SDK or to the installed ONLYOFFICE application.

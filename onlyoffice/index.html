@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TwoDrive 自动保存</title>
+  <script src="vendor/plugins.js"></script>
+  <script src="settings.js"></script>
+  <script src="autosave.js"></script>
+  <script defer src="plugin.js"></script>
+  <style>
+    *{box-sizing:border-box}body{font:13px/1.55 system-ui,sans-serif;margin:0;padding:16px;color:#263747;background:#fafcfe}
+    h1{font-size:18px;margin:0 0 16px}label{display:block;margin:14px 0 6px}input,select,button{font:inherit}
+    input[type=text],input[type=password],select{width:100%;border:1px solid #c4d1dc;border-radius:5px;padding:8px;background:white}
+    button{padding:7px 10px;border-radius:5px;border:1px solid #abc2d3;cursor:pointer;background:#fff;margin-top:8px}
+    button.primary{background:#1679b3;color:white;border-color:#1679b3}button:disabled{opacity:.45;cursor:default}
+    .switch{display:flex;align-items:center;gap:8px;font-weight:600}small,.note{color:#5c6c79}#status{padding:12px;background:#eaf4fa;border-radius:6px;margin:16px 0;overflow-wrap:anywhere}
+    .note{font-size:12px}details{margin-top:18px}#target{overflow-wrap:anywhere;font-size:12px}hr{border:0;border-top:1px solid #dce5ec;margin:18px 0}
+  </style>
+</head>
+<body>
+  <h1>TwoDrive 自动保存</h1>
+  <label class="switch"><input id="enabled" type="checkbox">自动保存</label>
+  <div id="status" role="status" aria-live="polite">正在连接本地服务…</div>
+  <div id="target"></div>
+  <label for="source">当前文档（自动识别）</label>
+  <input id="source" type="text" placeholder="未命名文档尚无原文件位置">
+  <button id="choose-source">选择原文件…</button>
+  <label class="note"><input id="confirm-source" type="checkbox">已从桌面编辑器识别原文件</label>
+  <label for="title">未命名文档的副本名称</label>
+  <input id="title" type="text" value="Untitled">
+  <label for="format">文档格式（必须与原文件一致）</label>
+  <select id="format"><option value="docx">Word · DOCX</option><option value="xlsx">Spreadsheet · XLSX</option><option value="pptx">Presentation · PPTX</option><option value="odt">Writer · ODT</option><option value="ods">Calc · ODS</option><option value="odp">Impress · ODP</option></select>
+  <label for="copy-directory">TwoDrive 内的副本目录</label>
+  <input id="copy-directory" type="text" placeholder="默认：Office AutoSave">
+  <button id="choose-directory">选择目录…</button>
+  <p class="note">原文件在 TwoDrive 内时原位保存；其他文件写入此目录。更改位置前请关闭自动保存，再重新开启。</p>
+  <button id="save-now" class="primary" disabled>立即保存</button>
+  <hr>
+  <p class="note">请保持此插件面板打开。文字编辑触发约 1 秒后的保存；其他修改由最长 10 秒的检查补齐。保存的是当前编辑内容。原位保存由本地服务写入，编辑器自身的“未保存”标记可能仍在。</p>
+  <details><summary>本地服务连接设置</summary>
+    <label for="bridge-url">服务地址</label><input id="bridge-url" type="text">
+    <label for="bridge-token">本地连接密钥</label><input id="bridge-token" type="password" autocomplete="off">
+    <button id="connect">连接</button>
+    <p class="note">运行项目中的 install.py 可自动配置连接。此插件用于本机 Desktop Editors。</p>
+  </details>
+</body>
+</html>
