@@ -6,6 +6,9 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +48,7 @@ def main():
         directory = args.oo_directory or data_root / "onlyoffice/desktopeditors/sdkjs-plugins/{F2C67A12-E94D-4EF6-8C32-20D71F3B0294}"
         directory.mkdir(parents=True, exist_ok=True)
         shutil.copytree(ROOT / "onlyoffice", directory, dirs_exist_ok=True)
+        shutil.copyfile(ROOT / "LICENSE", directory / "LICENSE")
         path = directory / "settings.js"
         path.write_text("window.TWODRIVE_BRIDGE = " + json.dumps({
             "url": f"http://127.0.0.1:{settings.bridge_port}", "token": settings.bridge_token}) + ";\n")
@@ -55,20 +59,36 @@ def main():
         runtime = Path.home() / ".local/lib/twodrive-office"
         shutil.copytree(ROOT / "twodrive_office", runtime / "twodrive_office", dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copyfile(ROOT / "LICENSE", runtime / "LICENSE")
         user_units = Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user"
         user_units.mkdir(parents=True, exist_ok=True)
-        def unit_quote(value):
-            return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
         unit = "\n".join([
             "[Unit]", "Description=TwoDrive Office local save bridge", "After=graphical-session.target", "",
             "[Service]", "Type=simple", "ExecStart=/usr/bin/python3 -m twodrive_office.cli serve",
-            "WorkingDirectory=" + unit_quote(runtime), "Restart=on-failure", "RestartSec=5",
+            "WorkingDirectory=%h/.local/lib/twodrive-office", "Restart=on-failure", "RestartSec=5",
             "Nice=10", "IOSchedulingClass=best-effort", "IOSchedulingPriority=7", "UMask=0077", "",
             "[Install]", "WantedBy=default.target", "",
         ])
-        (user_units / "twodrive-office-bridge.service").write_text(unit)
+        unit_path = user_units / "twodrive-office-bridge.service"
+        unit_path.write_text(unit)
+        subprocess.run(["systemd-analyze", "--user", "verify", str(unit_path)], check=True)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
         subprocess.run(["systemctl", "--user", "enable", "--now", "twodrive-office-bridge.service"], check=True)
+        request = urllib.request.Request(f"http://127.0.0.1:{settings.bridge_port}/settings",
+            headers={"Authorization": "Bearer " + settings.bridge_token})
+        deadline = time.monotonic() + 10
+        while True:
+            try:
+                with urllib.request.urlopen(request, timeout=1) as response:
+                    actual = json.load(response)
+                if actual != {"mount_root": str(settings.mount_root), "copy_directory": str(settings.copy_directory)}:
+                    raise RuntimeError("Bridge returned settings different from the installed configuration")
+                break
+            except (urllib.error.URLError, OSError):
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Bridge did not become ready; check systemctl --user status twodrive-office-bridge.service") from None
+                time.sleep(0.1)
+        subprocess.run(["systemctl", "--user", "is-active", "--quiet", "twodrive-office-bridge.service"], check=True)
         print("Authenticated bridge running on loopback. No documents are saved until enabled in the plugin.")
 
 

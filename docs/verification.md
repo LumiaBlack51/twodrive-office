@@ -37,6 +37,16 @@ Flatpak 强制覆盖 `flatpak run --env` 传入的 DISPLAY/XDG 路径。第一�
 
 ## 重现
 
+## 本机安装检查 · 2026-10-14
+
+经用户明确要求，插件现已安装到日常用户配置。LibreOffice 的 `org.twodrive.office.autosave` 0.1.0 及其 Python 组件、菜单配置均显示已注册；ONLYOFFICE 插件安装到 Flatpak 用户插件目录，文件及连接配置已核对。
+
+首次安装发现 systemd 不接受带字面双引号的 `WorkingDirectory`。安装脚本改为 `%h/.local/lib/twodrive-office`，在启动前验证 unit，并在报告成功前验证认证 HTTP 响应及实际活动状态，避免误报安装成功。脚本也为本地运行时和直接安装的插件保留 MIT 许可文件。
+
+`twodrive-office-bridge.service` 已启用且处于 `active/running`，Nice=10、I/O 优先级=7，仅监听 `127.0.0.1:19836`。原生插件 Origin 的认证请求通过，无凭据请求被拒绝；设置文件和连接文件权限为 0600。安装结束时没有 ONLYOFFICE 或 LibreOffice 编辑器进程；没有打开文档、开启自动保存或执行真实文件保存。
+
+## 重现命令
+
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py'
 node --test tests/onlyoffice.test.js
