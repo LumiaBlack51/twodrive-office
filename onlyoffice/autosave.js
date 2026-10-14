@@ -7,24 +7,28 @@
         return true;
     }
     class AutoSave {
-        constructor(exportDocument, writeDocument, report, now = () => Date.now()) {
+        constructor(exportDocument, writeDocument, report, now = () => Date.now(), didSave = () => "已本地保存，云端由 TwoDrive 同步") {
             this.exportDocument = exportDocument;
             this.writeDocument = writeDocument;
             this.report = report;
             this.now = now;
+            this.didSave = didSave;
             this.enabled = this.busy = false;
             this.generation = this.revision = this.savedRevision = 0;
             this.firstChange = this.dueAt = null;
             this.failures = 0;
             this.retryAt = 0;
             this.lastBytes = null;
+            this.lastResult = null;
         }
-        start() {
+        start(dirty = true) {
             this.generation++;
             this.enabled = true;
             this.lastBytes = null;
+            this.lastResult = null;
             this.failures = this.retryAt = 0;
-            this.changed();
+            if (dirty) this.changed();
+            else { this.savedRevision = this.revision; this.firstChange = this.dueAt = null; }
         }
         stop() {
             this.generation++;
@@ -49,14 +53,16 @@
                 const bytes = await this.exportDocument();
                 if (!this.enabled || generation !== this.generation) return;
                 if (!(bytes instanceof ArrayBuffer) || !bytes.byteLength) throw new Error("编辑器返回的导出文件为空");
-                if (!equalBytes(this.lastBytes, bytes)) await this.writeDocument(bytes);
+                const result = equalBytes(this.lastBytes, bytes) ? this.lastResult : await this.writeDocument(bytes);
                 if (!this.enabled || generation !== this.generation) return;
+                const message = this.didSave(bytes, result);
                 this.lastBytes = bytes;
+                this.lastResult = result;
                 this.savedRevision = revision;
                 this.failures = this.retryAt = 0;
                 if (this.revision === revision) this.firstChange = this.dueAt = null;
                 else { this.firstChange = this.now(); this.dueAt = this.now() + 1000; }
-                this.report("已本地保存，云端由 TwoDrive 同步");
+                this.report(this.revision === revision ? message : "上一版本已本地保存；新修改仍待保存，云端同步由 TwoDrive 处理");
             } catch (error) {
                 if (!this.enabled || generation !== this.generation) return;
                 this.failures++;

@@ -17,7 +17,7 @@ from com.sun.star.lang import XInitialization, XServiceInfo
 from com.sun.star.task import XJob, XJobExecutor, XInteractionHandler
 from com.sun.star.util import XModifyListener
 
-from twodrive_office.policy import Settings, SaveError, check_source, fingerprint, plan_save, prepare_target
+from twodrive_office.policy import Settings, SaveError, check_source, fingerprint, plan_save, prepare_target, normalized, within
 from twodrive_office.scheduler import PendingSave
 
 IMPLEMENTATION = "org.twodrive.office.AutoSave"
@@ -49,6 +49,8 @@ class DocumentState(unohelper.Base, XModifyListener):
         self.plan = self.expected = None
         self.error = ""
         self.status = "自动保存：关"
+        self.auto_source = None
+        self.manually_disabled = False
         self.pending = PendingSave(manager.settings.debounce_seconds, manager.settings.max_wait_seconds)
         document.addModifyListener(self)
 
@@ -80,6 +82,30 @@ class DocumentState(unohelper.Base, XModifyListener):
         if self.document.supportsService("com.sun.star.presentation.PresentationDocument"):
             return "odp"
         raise SaveError("目前支持 Writer、Calc、Impress")
+
+    def auto_enable(self):
+        if self.enabled or self.closed or self.manually_disabled:
+            return
+        try:
+            source = self.source()
+            if not source or source == self.auto_source:
+                return
+            settings = Settings.load()
+            if os.environ.get("TWODRIVE_OFFICE_DEBUG") == "1":
+                print("TwoDrive auto-enable check:", source, settings.mount_root, flush=True)
+            if not within(normalized(source), normalized(settings.mount_root)):
+                self.auto_source = source
+                return
+            self.enable()
+            self.auto_source = source
+            if not self.document.isModified():
+                self.pending.succeeded(self.pending.revision, time.monotonic())
+                self.status = "自动保存：开（TwoDrive 内文档），等待修改"
+        except Exception as exc:
+            self.enabled = False
+            self.status = "自动保存未开启：" + (str(exc) if isinstance(exc, SaveError) else "请检查 TwoDrive 设置")
+            if os.environ.get("TWODRIVE_OFFICE_DEBUG") == "1":
+                print("TwoDrive auto-enable failed:", repr(exc), flush=True)
 
     def enable(self, copy_directory=None):
         self.manager.settings = Settings.load()
@@ -167,7 +193,9 @@ class Manager(unohelper.Base, XCallback, XDocumentEventListener):
                 "com.sun.star.text.TextDocument", "com.sun.star.sheet.SpreadsheetDocument",
                 "com.sun.star.presentation.PresentationDocument"))
             if supported and not any(s.document == document for s in self.states):
-                self.states.append(DocumentState(self, document))
+                state = DocumentState(self, document)
+                self.states.append(state)
+                state.auto_enable()
         except Exception:
             pass
 
@@ -200,12 +228,17 @@ class Manager(unohelper.Base, XCallback, XDocumentEventListener):
     def documentEventOccured(self, event):
         if event.EventName in ("OnLoad", "OnNew", "OnViewCreated"):
             self.track(event.Source)
+            state = next((s for s in self.states if s.document == event.Source), None)
+            if state:
+                state.auto_enable()
         elif event.EventName == "OnPrepareUnload":
             state = next((s for s in self.states if s.document == event.Source), None)
             if state and state.enabled and state.pending.revision > state.pending.saved_revision:
                 state.save()
-        elif event.EventName == "OnSaveDone":
+        elif event.EventName in ("OnSaveDone", "OnSaveAsDone"):
             state = next((s for s in self.states if s.document == event.Source), None)
+            if state and not state.enabled:
+                state.auto_enable()
             if state and state.enabled and state.plan.in_place and not state.saving:
                 state.expected = fingerprint(state.plan.target)
                 state.pending.succeeded(state.pending.revision, time.monotonic())
@@ -281,6 +314,7 @@ class AutoSave(unohelper.Base, XJob, XJobExecutor, XDispatchProvider, XDispatch,
             if action == "Toggle":
                 if state.enabled:
                     state.enabled, state.status = False, "自动保存：关"
+                    state.manually_disabled = True
                 else:
                     source = state.source()
                     plan = plan_save(instance.settings, source, state.document.getTitle(), state.document_id, state.format())
@@ -290,6 +324,7 @@ class AutoSave(unohelper.Base, XJob, XJobExecutor, XDispatchProvider, XDispatch,
                         if directory is None:
                             return
                     state.enable(directory)
+                    state.manually_disabled = False
                     state.enabled_source = source
             elif action == "ChooseDestination":
                 directory = instance.choose_directory(instance.settings.copy_directory)

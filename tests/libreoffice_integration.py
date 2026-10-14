@@ -2,6 +2,7 @@
 """Real UNO/headless tests with a unique profile, pipe, config and temporary documents."""
 import importlib.util
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from com.sun.star.frame import XStatusListener
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+from twodrive_office import __version__
 from twodrive_office.policy import Settings
 
 
@@ -56,7 +58,7 @@ def main():
         settings.save(config_root / "twodrive-office/settings.json")
         profile = temp / "lo-profile"
         env = {**os.environ, "XDG_CONFIG_HOME": str(config_root), "SAL_USE_VCLPLUGIN": "svp", "TWODRIVE_OFFICE_DEBUG": "1"}
-        package = ROOT / "dist/twodrive-autosave-0.1.0.oxt"
+        package = ROOT / "dist" / f"twodrive-autosave-{__version__}.oxt"
         subprocess.run(["unopkg", "-env:UserInstallation=" + profile.as_uri(), "add", "--force", str(package)],
                        env=env, check=True, capture_output=True, timeout=30)
         print("PASS extension registered in isolated profile", flush=True)
@@ -66,7 +68,7 @@ def main():
                 "nice", "-n", "10", "libreoffice", "-env:UserInstallation=" + profile.as_uri(),
                 "--headless", "--norestore", "--nodefault", "--nofirststartwizard", "--nologo",
                 "--accept=pipe,name=" + pipe + ";urp;StarOffice.ServiceManager",
-            ], env=env, stdout=log, stderr=log)
+            ], env=env, stdout=log, stderr=log, start_new_session=True)
             desktop = None
             try:
                 local = uno.getComponentContext()
@@ -88,6 +90,9 @@ def main():
                 source = mount / "inplace.odt"
                 doc.Text.String = "initial"
                 doc.storeAsURL(source.as_uri(), (prop("FilterName", "writer8"),))
+                doc.dispose()
+                untouched = (source.read_bytes(), source.stat().st_mtime_ns)
+                doc = desktop.loadComponentFromURL(source.as_uri(), "_blank", 0, (prop("Hidden", True),))
                 extension.initialize((doc.getCurrentController().getFrame(),))
                 extension.trigger("startup")
                 url = uno.createUnoStruct("com.sun.star.util.URL")
@@ -102,9 +107,12 @@ def main():
                         pass
                 status = Status()
                 dispatcher.addStatusListener(status, url)
-                dispatcher.dispatch(url, ())
-                assert status.latest and status.latest.State, "toggle did not enable: " + str(status.latest)
+                if not status.latest or not status.latest.State:
+                    print((temp / "soffice.log").read_text(), flush=True)
+                assert status.latest and status.latest.State, "mount document did not auto-enable: " + str(status.latest)
                 wait_until(lambda: not doc.isModified(), "initial native autosave failed")
+                time.sleep(0.6)
+                assert (source.read_bytes(), source.stat().st_mtime_ns) == untouched, "opening an unchanged document rewrote it"
                 doc.Text.String = "automatic-inplace-test"
                 try:
                     wait_until(lambda: contains(source, "automatic-inplace-test") and not doc.isModified(),
@@ -113,12 +121,18 @@ def main():
                     print("Save status:", status.latest.FeatureDescriptor, flush=True)
                     print((temp / "soffice.log").read_text(), flush=True)
                     raise
-                print("PASS installed toolbar dispatch + real modify event + UI callback + in-place save", flush=True)
+                print("PASS automatic enable + real modify event + UI callback + in-place save", flush=True)
                 dispatcher.dispatch(url, ())
                 doc.Text.String = "disabled-edit"
                 time.sleep(1.5)
                 assert not contains(source, "disabled-edit"), "disabled autosave wrote changes"
                 print("PASS disabled document is not saved", flush=True)
+                doc.store()
+                assert status.latest.State is False, "a manual save re-enabled the paused document"
+                doc.Text.String = "still-disabled-after-manual-save"
+                time.sleep(0.6)
+                assert not contains(source, "still-disabled-after-manual-save")
+                print("PASS manual pause survives native save events", flush=True)
 
                 # Exercise external/untitled export adapter without invoking a foreground FolderPicker.
                 spec = importlib.util.spec_from_file_location("autosave_integration", ROOT / "libreoffice/AutoSave.py")
@@ -134,6 +148,9 @@ def main():
                 copy_doc = desktop.loadComponentFromURL("private:factory/swriter", "_blank", 0, (prop("Hidden", True),))
                 copy_doc.Text.String = "original-outside"
                 copy_doc.storeAsURL(outside.as_uri(), (prop("FilterName", "writer8"),))
+                extension.initialize((copy_doc.getCurrentController().getFrame(),))
+                dispatcher.addStatusListener(status, url)
+                assert status.latest.State is False, "an outside document auto-enabled"
                 before = outside.read_bytes()
                 with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config_root)}):
                     state = module.DocumentState(test_manager, copy_doc)
@@ -155,6 +172,9 @@ def main():
                     copy_doc.dispose()
 
                     blank = desktop.loadComponentFromURL("private:factory/swriter", "_blank", 0, (prop("Hidden", True),))
+                    extension.initialize((blank.getCurrentController().getFrame(),))
+                    dispatcher.addStatusListener(status, url)
+                    assert status.latest.State is False, "an untitled document auto-enabled"
                     blank.Text.String = "untitled-current-edits"
                     state = module.DocumentState(test_manager, blank)
                     state.enable()
@@ -216,8 +236,12 @@ def main():
                 try:
                     process.wait(timeout=10)
                 except subprocess.TimeoutExpired:
-                    process.terminate()
-                    process.wait(timeout=5)
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=5)
         print("All test state removed; normal profiles and real TwoDrive mount untouched.", flush=True)
 
 

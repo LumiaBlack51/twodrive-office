@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install for the next office launch. Never launches an editor or enables AutoSave."""
+"""Install for the next office launch without opening or changing any document."""
 import argparse
 import json
 import os
@@ -35,7 +35,7 @@ def main():
             command.append("-env:UserInstallation=" + args.lo_profile.resolve().as_uri())
         command += ["add", "--force", str(lo)]
         subprocess.run(command, check=True)
-        print("LibreOffice extension installed; AutoSave remains off until selected.")
+        print("LibreOffice extension installed; TwoDrive documents auto-enable on their next open.")
     if args.onlyoffice:
         data_root = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
         flatpak_installed = subprocess.run(["flatpak", "info", "org.onlyoffice.desktopeditors"],

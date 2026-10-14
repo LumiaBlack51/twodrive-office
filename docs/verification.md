@@ -1,4 +1,4 @@
-# 0.1.0 验证记录 · 2026-10-14
+# 0.2.0 验证记录（含 0.1.0 历史） · 2026-10-14
 
 开发目录：`/home/lumia/workspace/Projects/codex/office-extension`。TwoDrive 源码只读回顾自 `/home/lumia/software/twodrive` 的 `dev` 分支；未修改、重启或重新配置真实 TwoDrive。
 
@@ -7,7 +7,7 @@
 | 范围 | 实际结果 |
 | --- | --- |
 | 保存策略、桥接协议、回归用例 | 25 项 Python 测试通过：挂载断开、同名文档、符号链接、外部修改、原文件保护、加密/宏格式拒绝、缺失媒体拒绝、认证与原生 Origin、旧快照延迟返回时不能覆盖新版本、按需生命周期和继承监听 socket 等 |
-| ONLYOFFICE 调度 | 5 项 Node 测试通过：合并连续修改、最大延迟、失败重试、导出期间关闭、导出期间又有修改、避免重入和重复写入 |
+| ONLYOFFICE 调度与保存状态 | 18 项 Node 测试通过：目录内自动开启且未修改不写入、目录外/未命名/拒绝挂载不开启、暂停后不重开、合并修改、最大延迟、失败重试、关闭/替换会话后不能确认、保存期间又有修改、避免重入和重复写入、保存点与恢复检查点、同一撤销点中的新修改、原生保存/嵌入编辑/单元格编辑保护、未知 SDK 保留提示 |
 | LibreOffice 26.2.5.2 | `.oxt` 实际注册并加载于独立 profile。通过工具栏 dispatch → 真实修改事件 → UI 线程回调 → Writer 原位保存；关闭开关后停止；外部/未命名文档保存副本；检测副本外部冲突 |
 | LibreOffice Writer / Calc / Impress | 真实当前编辑内容分别导出至 ODT、XLSX、PPTX 副本，保留原文件字节、原 URL 和未保存标记；具体命令见下方 |
 | ONLYOFFICE Flatpak 9.4.0（内核 9.4.0.129） | 插件实际加载到编辑器。DOCX 带 PNG 图片的文档通过指定目录副本与原位保存；图片原始字节保持一致；关闭开关停止写入；外部原文件未被修改 |
@@ -51,14 +51,63 @@ Flatpak 强制覆盖 `flatpak run --env` 传入的 DISPLAY/XDG 路径。第一�
 
 ```bash
 python3 -m unittest discover -s tests -p 'test_*.py'
-node --test tests/onlyoffice.test.js
+node --test tests/onlyoffice*.test.js
 python3 scripts/build.py
 /usr/bin/python3 tests/libreoffice_integration.py
 python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --rich
 python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --rich --in-place
 python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format xlsx
 python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format pptx
+python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format pptx --in-place --race
+python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format xlsx --in-place
 python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --untitled
 ```
 
 ONLYOFFICE 重现脚本另需 `websocket-client`、Flatpak、xauth 和 xdpyinfo。开发时 Xvfb 从系统软件源下载后解包至忽略的 `.research/`，没有安装或变更系统软件包。
+
+## ONLYOFFICE 星号与关闭提示修复阶段 · 2026-10-14
+
+此节记录先前的保存状态修复；之后的后台启动、自动开启和 0.2.0 验证见末节。
+
+旧实现只让 bridge 将当前快照写入文件，没有更新 Desktop 的用户保存点。因此原位保存成功后，编辑器仍认为文档有修改，标题星号与关闭保存提示会残留。这是已确认的旧实现缺陷；此前 README 中关于原位保存可能保留星号的说明已被本轮修复取代。保存副本时，原文档没有被写回，保留其未保存提示是预期行为。
+
+原位保存现在仅在收到当前会话、正确目标的 `saved_local` 响应后确认。关闭/重新开启开关会使旧请求失效；另存为其他源路径也不能确认旧文件。确认前同步重新读取 native 模型快照，与实际提交的快照比较；有新内容则保留/刷新未保存提示并安排下一次保存，不会将新编辑误标为已保存。失败保留待保存状态。每次导出提交使用独立递增版本，避免“服务已经写入但响应丢失”后重试同一版本而永远无法取得确认。
+
+状态适配器只更新 `UserSavedIndex` 与 `ForceSave`，并通过编辑器的 `SetDocumentModified` 刷新编辑器和真实 Desktop 原生窗口。供本机恢复/增量流水线使用的 `SavedIndex` 不随外部写入推进；不调用整个 `Reset_SavedIndex`，也不伪造原生保存结束回调。Native 适配与公开 web 插件 API 仍然不同：编译后的私有字段按完整的保存点函数结构识别，并核实字段类型及原生保存、嵌入编辑、单元格编辑的状态保护；不依赖某一编辑器的压缩字段名。结构不匹配时继续保留星号，并在面板明确报告无法更新编辑器保存状态。参考 [Desktop 演示编辑器保存点与原生修改通知的 SDK 源码](https://github.com/ONLYOFFICE/sdkjs/blob/72b0421c0bbf9d01eed9cf14834ae47eb2df1b50/slide/Local/api.js)。
+
+本轮实际版本仍为本机 Flatpak 9.4.0，安装提交 `5806f4728bd3e2bc5314c2c0dfbc59d10dcac33516b5536ac12ceae2e79f98c1`。未验证其他 SDK 构建/版本或 ODF 保存状态，不将这些结果推广至其他版本。
+
+实际验证结果：
+
+- Python 25 项、Node 13 项通过；安装包构建通过。
+- 真实 PPTX、含 PNG 的 DOCX、XLSX 原位写入当前内容后，`isDocumentModified()` 与转发到真实 Desktop 的原生修改通知均为 false。关闭开关后不再写入；撤销离开保存点会变为未保存，重做回到保存点会恢复；通过私有 Xvfb 上的 `WM_DELETE_WINDOW` 关闭实际应用窗口，文档正常退出且没有保存确认阻塞。
+- PPTX 延迟 bridge 写入成功响应，期间再次执行实际 SDK 编辑：旧确认不会发出清除新修改的通知，新版本随后自动写入并确认。另模拟成功写入后丢失 HTTP 响应：保留警告，未继续输入也能退避重试并恢复确认。
+- PPTX 保存到指定副本目录时，源文件字节不变，编辑器与原生未保存状态仍为 true，原生关闭请求仍保护未保存的原文档。面板明确显示“已保存到副本”，不宣称原文件已保存或云端上传完成。
+- `--format pptx --untitled` 的实际未命名演示文稿也能保存副本，仍保留编辑器与原生未保存状态及关闭保护。
+- 修改隔离 profile 内的插件脚本后，只关闭、重开插件面板便加载了新脚本；文档和编辑器没有重启。
+
+所有办公文件和挂载目录均为临时测试数据，未使用真实 TwoDrive 挂载或用户工作文件。编辑器运行在关闭 X11/Wayland socket 的独立 Flatpak 环境中，使用认证 TCP Xvfb；本轮没有操作前台文档。重现脚本同时修正了调试端口日志解析和完整进程组清理：不能只等待 Flatpak 启动器退出便认为编辑器子进程已经退出；仅回收本次测试的独立进程组，并验证无存活成员。
+
+验证完成后，已将 `autosave.js`、`native-state.js`、`plugin.js`、`index.html` 四个文件更新到本机现有 Flatpak 插件目录，并与本轮构建包逐字节核对。原文件备份于开发目录的 `.test-state/onlyoffice-saved-state-backup-c05871a3`；连接设置 `settings.js` 字节保持不变。安装没有重启编辑器或桥接、没有修改办公软件偏好或操作当前文档。当前已打开的旧面板需由用户关闭并重新打开，再重新开启自动保存；不必重启文档或 ONLYOFFICE。
+
+## 0.2.0：目录内文档自动开启 · 2026-10-14
+
+ONLYOFFICE 配置改为公开配置支持的 `system` 类型，在打开文档时加载隐藏的保存控制器。控制器请求 bridge 创建会话后，只接受经规范化路径、挂载和可写性检查确认的 `in_place` 结果；目录外返回的副本会话立即关闭，不导出、不写入副本；未命名文档不创建自动会话。不能只按字符串前缀判定目录，符号链接和相邻目录仍由 bridge 的既有保存策略处理。参考 [插件类型](https://api.onlyoffice.com/docs/plugins/configuration/types)。
+
+**TwoDrive → 自动保存** 工具栏入口通过公开 `PluginWindow` 接口打开独立控制面板，与每文档唯一的隐藏控制器同步状态和用户操作。关闭面板不会卸载控制器或关闭自动保存。9.4 的实际前端仍要求窗口参数包含 `isVisual: true`；本轮保留该兼容参数并实际验证面板显示及消息往返。手动暂停后，内容就绪事件和轮询不会重新开启；重新打开文档则按目录重新判断。
+
+LibreOffice 在跟踪/加载文档时执行同样的目录检查，经 `enable()` 的挂载、格式、只读和加密检查后开启；原位文件已保存且未修改时清空初始待保存任务。手动关闭有当前文档级标记，正常手动保存事件不会覆盖该选择。目录外、未命名文档继续使用用户主动选择的副本流程。
+
+两种适配器都避免仅因打开未修改文档而导出或覆盖。ONLYOFFICE 轮询与修改事件以编辑器的修改状态为依据；实际测试用 SDK Builder 命令修改内容，并调用界面状态刷新来提交对应的修改通知。完全绕过 SDK 修改状态的外部脚本赋值不属于本轮触发保证，可显式刷新修改状态或使用“立即保存”。
+
+最终验证：
+
+- Python 25 项、Node 18 项通过。新增覆盖：未修改文档启用但不导出/写入、bridge 判定为副本时拒绝自动开启、未命名/挂载拒绝时不开启、手动暂停后不被内容就绪事件和轮询重开。
+- ONLYOFFICE Flatpak 9.4.0：PPTX（含延迟/丢失响应测试）、带 PNG 的 DOCX、XLSX 都在没有调用 `asc_pluginRun` 的情况下自动加载控制器、开启原位保存。修改前原文件字节不变；修改后实际写入、清除保存标记、撤销/重做及原生关闭通过。
+- 目录外和未命名 PPTX 在打开时保持关闭且不生成任何副本；手动开启后仍可保存指定副本并保留原文档关闭保护。实际工具栏回调打开的面板显示了控制器开关状态；面板关闭后自动保存继续，面板暂停会停止后台保存，后续内容就绪事件不会重开。
+- LibreOffice 26.2.5.2：本轮 `0.2.0.oxt` 实际注册于独立 profile，`--headless` 打开临时挂载内 ODT 后自动开启；未修改文件字节和 mtime 保持不变。真实修改自动原位保存，手动暂停在手动保存后仍保持；目录外/未命名文档未自动开启，Writer/Calc/Impress 副本回归通过。
+- 测试脚本按运行时版本选择 OXT，修正了最初仍指向旧 `0.1.0.oxt` 的测试路径；上面的 LibreOffice 结论来自修正后实际执行的新包。所有启动的编辑器均采用隔离环境和临时文档；没有启动前台编辑器或使用真实 TwoDrive 文件。
+
+构建脚本从运行时版本生成包名，并拒绝运行时、LibreOffice 和 ONLYOFFICE manifest 版本不一致的构建。0.2.0 继续是开发预览版；SDK、ODF、复杂对象和真实云端上传的边界沿用上述记录。
+
+验证后已安装本机 0.2.0：`unopkg list org.twodrive.office.autosave` 确认 LibreOffice 扩展及组件注册为 0.2.0；ONLYOFFICE 的七个程序/界面/配置文件与构建包逐字节一致，已有连接设置保持原字节。ONLYOFFICE 旧程序文件备份于 `.test-state/onlyoffice-before-0.2.0-ed1b91a7`。安装未启动/重启办公软件或 bridge，未操作当前文档；新的后台启动配置在用户下次自行启动办公软件后生效。

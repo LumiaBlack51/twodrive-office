@@ -7,6 +7,7 @@
   <script src="vendor/plugins.js"></script>
   <script src="settings.js"></script>
   <script src="autosave.js"></script>
+  <script src="native-state.js"></script>
   <script defer src="plugin.js"></script>
   <style>
     *{box-sizing:border-box}body{font:13px/1.55 system-ui,sans-serif;margin:0;padding:16px;color:#263747;background:#fafcfe}
@@ -37,7 +38,7 @@
   <p class="note">原文件在 TwoDrive 内时原位保存；其他文件写入此目录。更改位置前请关闭自动保存，再重新开启。</p>
   <button id="save-now" class="primary" disabled>立即保存</button>
   <hr>
-  <p class="note">请保持此插件面板打开。文字编辑触发约 1 秒后的保存；其他修改由最长 10 秒的检查补齐。保存的是当前编辑内容。原位保存由本地服务写入，编辑器自身的“未保存”标记可能仍在。</p>
+  <p class="note">TwoDrive 内的文档打开后自动开启保存，关闭此面板不影响后台保存；可用上方开关暂停。文字编辑触发约 1 秒后的保存；其他修改由最长 10 秒的检查补齐。原位保存成功后更新编辑器的保存状态；保存副本时，原文档仍会保留未保存提示。插件确认本地写入，云端同步由 TwoDrive 处理。</p>
   <details><summary>本地服务连接设置</summary>
     <label for="bridge-url">服务地址</label><input id="bridge-url" type="text">
     <label for="bridge-token">本地连接密钥</label><input id="bridge-token" type="password" autocomplete="off">
