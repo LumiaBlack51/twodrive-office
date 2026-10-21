@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <description xmlns="http://openoffice.org/extensions/description/2006" xmlns:d="http://openoffice.org/extensions/description/2006">
   <identifier value="org.twodrive.office.autosave"/>
-  <version value="0.2.0"/>
+  <version value="0.2.1"/>
   <display-name><name lang="en">TwoDrive AutoSave</name><name lang="zh-CN">TwoDrive 自动保存</name></display-name>
   <publisher><name lang="en">TwoDrive Office</name></publisher>
   <dependencies><OpenOffice.org-minimal-version value="4.1" d:name="LibreOffice 7.0 or later"/></dependencies>

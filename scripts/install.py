@@ -14,6 +14,17 @@ from twodrive_office.policy import Settings, config_path
 from build import build
 
 
+def onlyoffice_directories(data_root: Path, override: Path | None = None):
+    if override is not None:
+        return [override]
+    root = data_root / "onlyoffice/desktopeditors"
+    guid = "{F2C67A12-E94D-4EF6-8C32-20D71F3B0294}"
+    # Native 9.4 and 10.0 enumerate different user roots. Installing the same
+    # GUID into both layouts works before the first launch and after upgrades;
+    # each native version reads its own registry, without launching an editor.
+    return [root / "sdkjs-plugins" / guid, root / "data/sdkjs-plugins" / guid]
+
+
 def main():
     parser = argparse.ArgumentParser(description="Install TwoDrive AutoSave without opening office windows")
     parser.add_argument("--libreoffice", action="store_true")
@@ -42,15 +53,15 @@ def main():
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0 if shutil.which("flatpak") else False
         if args.oo_flatpak or (flatpak_installed and not shutil.which("onlyoffice-desktopeditors")):
             data_root = Path.home() / ".var/app/org.onlyoffice.desktopeditors/data"
-        directory = args.oo_directory or data_root / "onlyoffice/desktopeditors/sdkjs-plugins/{F2C67A12-E94D-4EF6-8C32-20D71F3B0294}"
-        directory.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(ROOT / "onlyoffice", directory, dirs_exist_ok=True)
-        shutil.copyfile(ROOT / "LICENSE", directory / "LICENSE")
-        path = directory / "settings.js"
-        path.write_text("window.TWODRIVE_BRIDGE = " + json.dumps({
-            "url": f"http://127.0.0.1:{settings.bridge_port}", "token": settings.bridge_token}) + ";\n")
-        path.chmod(0o600)
-        print("ONLYOFFICE plugin installed:", directory)
+        for directory in onlyoffice_directories(data_root, args.oo_directory):
+            directory.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(ROOT / "onlyoffice", directory, dirs_exist_ok=True)
+            shutil.copyfile(ROOT / "LICENSE", directory / "LICENSE")
+            path = directory / "settings.js"
+            path.write_text("window.TWODRIVE_BRIDGE = " + json.dumps({
+                "url": f"http://127.0.0.1:{settings.bridge_port}", "token": settings.bridge_token}) + ";\n")
+            path.chmod(0o600)
+            print("ONLYOFFICE plugin installed:", directory)
     if args.bridge:
         # Copy the runtime out of the development workspace, so moving source doesn't break the service.
         runtime = Path.home() / ".local/lib/twodrive-office"
