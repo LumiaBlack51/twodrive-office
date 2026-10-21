@@ -129,4 +129,4 @@ LibreOffice 在跟踪/加载文档时执行同样的目录检查，经 `enable()
 
 一次并行运行两个应用测试造成原生共用调试端口竞争，其中一个未找到调试目标，未通过文档身份门控、未执行保存。测试现用本机锁串行执行，清理仅针对各自独立进程组；没有关闭正常桌面上的编辑器。旧 9.4 验证保留为历史，不冒称本次重新运行了 9.4。
 
-最终 Python/Node、实际应用、打包、PR 与 Release 结果待实际完成后补充。安装时保留连接凭据，不启动编辑器；用户自己的旧编辑会话须自行正常重开后加载新插件。
+最终 31 项 Python、18 项 Node、0.2.1 包构建通过；最终实际 PPTX 原位/副本、带图片 DOCX 与 XLSX 的空闲稳定及保存保护均通过。修复源提交 `115ccdb3e115c903820a0dbd4b2f5c9fcfa1f0c7` 已提交 [PR #1](https://github.com/LumiaBlack51/twodrive-office/pull/1)，该源码的 [Office checks](https://github.com/LumiaBlack51/twodrive-office/actions/runs/39584311891) 已通过。Release 尚未发布；发布后补充交付记录。安装时保留连接凭据，不启动编辑器；用户自己的旧编辑会话须自行正常重开后加载新插件。
