@@ -130,3 +130,14 @@ LibreOffice 在跟踪/加载文档时执行同样的目录检查，经 `enable()
 一次并行运行两个应用测试造成原生共用调试端口竞争，其中一个未找到调试目标，未通过文档身份门控、未执行保存。测试现用本机锁串行执行，清理仅针对各自独立进程组；没有关闭正常桌面上的编辑器。旧 9.4 验证保留为历史，不冒称本次重新运行了 9.4。
 
 最终 31 项 Python、18 项 Node、0.2.1 包构建通过；最终实际 PPTX 原位/副本、带图片 DOCX 与 XLSX 的空闲稳定及保存保护均通过。修复源提交 `115ccdb3e115c903820a0dbd4b2f5c9fcfa1f0c7` 已提交 [PR #1](https://github.com/LumiaBlack51/twodrive-office/pull/1)，该源码的 [Office checks](https://github.com/LumiaBlack51/twodrive-office/actions/runs/39584311891) 已通过。Release 尚未发布；发布后补充交付记录。安装时保留连接凭据，不启动编辑器；用户自己的旧编辑会话须自行正常重开后加载新插件。
+
+
+### 0.2.1 交付补记 · 2026-10-21
+
+[PR #1](https://github.com/LumiaBlack51/twodrive-office/pull/1) 已合入 main，合并提交 `09a27bc34734b01bd393ffde01d951e8ba9cc0c8`；不可移动的注解标签 v0.2.1 指向已整合的 `a629d914ec9efdfb8b8d1afaa93512f37ab0b9f0`，两者 Git 树一致。最终源的 Office checks 成功。
+
+[0.2.1 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.2.1) 已公开；发布前后统一门控校验了全部四项附件（OXT、plugin、SHA256SUMS、verification.json）的 state/size/远端 SHA-256 及注解标签解析目标。它保持预览版，不替换 TwoDrive 稳定渠道。构建来自已检查的干净源码；没有宣称 ZIP 时间相关的本机构建字节与 CI 重打包完全一致。
+
+用户授权修复、发布和清理后的本机部署：桥接 MainPID=0 时从已核实发布包更新用户 runtime，并更新 9.4/10.0 两种 ONLYOFFICE 插件目录布局。配置及连接文件字节保持一致；未启动编辑器、没有更改当前文档或重启服务。后续正常打开文档才加载新插件；LibreOffice 的用户 profile 未由此轮修改。
+
+真实 OneDrive 同步、网页 Microsoft Office 和本地编辑器的协作往返仍未执行；复杂真实 PPTX 与完整文档样本集合仍是验证边界。测试只使用合成临时文档。此前源快照中的“待发布”是当时状态，现由本补记更新，保留先前证据。
