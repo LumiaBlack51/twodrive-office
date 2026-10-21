@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import posixpath
 import secrets
@@ -14,11 +15,37 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-from .policy import Settings, SaveError, SavePlan, atomic_write, check_source, fingerprint, normalized, plan_save
+from .policy import Settings, SaveError, SavePlan, atomic_write, check_source, fingerprint, normalized, plan_save, prepare_target
 from .lifecycle import Activity
 
 MAX_CONTENT = 128 * 1024 * 1024
 PLUGIN_ORIGINS = ("null", "file://", "onlyoffice://plugin")
+
+
+def document_content_digest(content: bytes, extension: str):
+    """Compare all package content, excluding serialization-only timestamps."""
+    checksum = hashlib.sha256()
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        for item in sorted(archive.infolist(), key=lambda item: item.filename):
+            data = archive.read(item)
+            if extension in ("docx", "xlsx", "pptx") and item.filename == "docProps/core.xml":
+                try:
+                    root = ET.fromstring(data, parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)))
+                    # x2t/native export advances this field even when the model
+                    # is unchanged. Preserve every other property and every
+                    # byte of slide/text/media/relationship parts in the hash.
+                    for child in list(root):
+                        if child.tag == "{http://purl.org/dc/terms/}modified":
+                            root.remove(child)
+                    data = ET.tostring(root, encoding="utf-8")
+                except ET.ParseError:
+                    pass  # Unrecognized metadata is compared verbatim.
+            name = item.filename.encode()
+            checksum.update(len(name).to_bytes(8, "big"))
+            checksum.update(name)
+            checksum.update(len(data).to_bytes(8, "big"))
+            checksum.update(data)
+    return checksum.hexdigest()
 
 
 def validate_document(content: bytes, extension: str):
@@ -64,6 +91,8 @@ class Session:
     expected: tuple | None
     source: Path | None = None
     last_revision: int = 0
+    snapshot_digest: str | None = None
+    content_digest: str | None = None
     touched: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -100,7 +129,7 @@ class Bridge:
             if now - session.touched > 3600 and not session.lock.locked():
                 del self.sessions[key]
 
-    def save(self, key: str, content: bytes, revision: int | None = None):
+    def save(self, key: str, content: bytes, revision: int | None = None, *, snapshot_digest: str | None = None):
         with self.lock:
             session = self.sessions.get(key)
             if not session:
@@ -111,10 +140,24 @@ class Bridge:
                 return {"status": "already_saved_newer", "target": str(session.plan.target)}
             check_source(session.source)
             validate_document(content, session.plan.extension)
-            session.expected = atomic_write(self.settings, session.plan, content, session.expected)
+            content_digest = document_content_digest(content, session.plan.extension)
+            if content_digest == session.content_digest:
+                self.validate_unchanged_target(session)
+            else:
+                session.expected = atomic_write(self.settings, session.plan, content, session.expected)
+            session.snapshot_digest = snapshot_digest
+            session.content_digest = content_digest
             if revision is not None:
                 session.last_revision = revision
         return {"status": "saved_local", "target": str(session.plan.target), "cloud_status": "managed_by_twodrive"}
+
+    def validate_unchanged_target(self, session: Session):
+        # A no-op still has to detect disconnected mounts, symlink changes,
+        # deleted originals and external edits before acknowledging the save.
+        prepare_target(self.settings, session.plan)
+        check_source(session.source)
+        if fingerprint(session.plan.target) != session.expected:
+            raise SaveError("目标文件被其他程序修改，请检查后重新开启自动保存")
 
     def save_snapshot(self, key: str, payload: bytes):
         from .converter import convert_snapshot
@@ -132,7 +175,19 @@ class Bridge:
         if source != session.source:
             raise SaveError("快照与当前保存会话的源文件不一致")
         check_source(source)
-        return self.save(key, convert_snapshot(snapshot, session.plan.extension), revision=revision)
+        # Revision orders HTTP attempts; it is not part of document content.
+        # Hash the native model AND media before conversion, since converters
+        # can emit different ZIP timestamps for the very same model.
+        model = {name: value for name, value in snapshot.items() if name != "revision"}
+        checksum = hashlib.sha256(json.dumps(model, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        with session.lock:
+            if revision <= session.last_revision:
+                return {"status": "already_saved_newer", "target": str(session.plan.target)}
+            if checksum == session.snapshot_digest:
+                self.validate_unchanged_target(session)
+                session.last_revision = revision
+                return {"status": "saved_local", "target": str(session.plan.target), "cloud_status": "managed_by_twodrive"}
+        return self.save(key, convert_snapshot(snapshot, session.plan.extension), revision=revision, snapshot_digest=checksum)
 
     def close(self, key):
         with self.lock:

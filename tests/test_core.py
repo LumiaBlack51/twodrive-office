@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from twodrive_office.policy import Settings, SaveError, atomic_write, fingerprint, plan_save, prepare_target
 from twodrive_office.scheduler import PendingSave
-from twodrive_office.bridge import Bridge, make_server, validate_document
+from twodrive_office.bridge import Bridge, make_server, validate_document, document_content_digest
 
 
 def docx(text="test"):
@@ -177,6 +177,68 @@ class SchedulerTests(unittest.TestCase):
 
 
 class BridgeTests(unittest.TestCase):
+    def test_content_digest_preserves_media_and_non_timestamp_metadata(self):
+        def package(author, media):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as archive:
+                archive.writestr("word/document.xml", "<document>unchanged</document>")
+                archive.writestr("word/media/image.png", media)
+                archive.writestr("docProps/core.xml", '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"><cp:lastModifiedBy>' + author + '</cp:lastModifiedBy></cp:coreProperties>')
+            return stream.getvalue()
+        baseline = document_content_digest(package("one", b"image-one"), "docx")
+        self.assertNotEqual(document_content_digest(package("two", b"image-one"), "docx"), baseline)
+        self.assertNotEqual(document_content_digest(package("one", b"image-two"), "docx"), baseline)
+
+    def test_export_timestamp_changes_do_not_replace_content_but_real_edits_do(self):
+        bridge = Bridge(self.settings)
+        session = bridge.create({"document_id": "clock", "extension": "docx"})
+        def exported(text, timestamp):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(io.BytesIO(docx(text))) as source, zipfile.ZipFile(stream, "w") as archive:
+                for name in source.namelist():
+                    archive.writestr(name, source.read(name))
+                archive.writestr("docProps/core.xml", '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dcterms="http://purl.org/dc/terms/"><dcterms:modified>' + timestamp + '</dcterms:modified></cp:coreProperties>')
+            return stream.getvalue()
+        bridge.save(session["session_id"], exported("same", "2026-10-18T10:00:00Z"))
+        target = Path(session["target"])
+        before = target.read_bytes(), fingerprint(target)
+        bridge.save(session["session_id"], exported("same", "2026-10-18T10:00:10Z"))
+        self.assertEqual((target.read_bytes(), fingerprint(target)), before)
+        bridge.save(session["session_id"], exported("edited", "2026-10-18T10:00:10Z"))
+        self.assertNotEqual(target.read_bytes(), before[0])
+
+    def test_identical_native_model_with_new_transport_revision_does_not_rewrite(self):
+        bridge = Bridge(self.settings)
+        session = bridge.create({"title": "No-op", "document_id": "noop", "extension": "docx"})
+        def payload(revision, media=None):
+            return json.dumps({"revision": revision, "binary": "same native model", "media": media or {}}).encode()
+        with patch("twodrive_office.converter.convert_snapshot", return_value=docx("saved")) as convert:
+            bridge.save_snapshot(session["session_id"], payload(1))
+            before = fingerprint(Path(session["target"]))
+            # Also models a committed request whose HTTP response was lost.
+            result = bridge.save_snapshot(session["session_id"], payload(2))
+            self.assertEqual(result["status"], "saved_local")
+            self.assertEqual(convert.call_count, 1, "transport-only changes must not reconvert and atomically replace the file")
+            self.assertEqual(fingerprint(Path(session["target"])), before)
+            bridge.save_snapshot(session["session_id"], payload(3, {"image.png": "YQ=="}))
+            self.assertEqual(convert.call_count, 2, "media changes are document changes")
+
+    def test_identical_snapshot_revalidates_destination_and_mount(self):
+        bridge = Bridge(self.settings)
+        session = bridge.create({"title": "No-op", "document_id": "noop", "extension": "docx"})
+        payload = lambda revision: json.dumps({"revision": revision, "binary": "same model"}).encode()
+        with patch("twodrive_office.converter.convert_snapshot", return_value=docx("saved")):
+            bridge.save_snapshot(session["session_id"], payload(1))
+            bridge.settings = replace(self.settings, require_mount=True)
+            with patch("os.path.ismount", return_value=False), self.assertRaises(SaveError):
+                bridge.save_snapshot(session["session_id"], payload(2))
+            bridge.settings = self.settings
+            target = Path(session["target"])
+            target.write_bytes(docx("external"))
+            with self.assertRaises(SaveError):
+                bridge.save_snapshot(session["session_id"], payload(3))
+            self.assertEqual(target.read_bytes(), docx("external"))
+
     setUp = SavePolicyTests.setUp
     def test_bridge_document_validation(self):
         validate_document(docx(), "docx")

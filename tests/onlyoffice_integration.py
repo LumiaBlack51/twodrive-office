@@ -4,7 +4,7 @@
 Requires websocket-client, flatpak, xauth, xdpyinfo and Xvfb. Never uses the
 user's display or profile. Synthetic input, output and SDK runtime are removed.
 """
-import sys, os, json, shutil, socket, subprocess, time, signal, threading, zipfile, urllib.request, shlex, re, base64
+import sys, os, json, shutil, socket, subprocess, time, signal, threading, zipfile, urllib.request, shlex, re, base64, fcntl
 from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 os.chdir(PROJECT)
@@ -18,6 +18,12 @@ parser.add_argument('--in-place', action='store_true')
 parser.add_argument('--untitled', action='store_true')
 parser.add_argument('--race', action='store_true', help='Edit again while the bridge delays acknowledgement')
 options = parser.parse_args()
+# The native debug switch uses a shared loopback port on current Desktop.
+# Serialize this suite rather than attaching to another test's editor.
+lock_path = PROJECT / '.test-state/onlyoffice-integration.lock'
+lock_path.parent.mkdir(exist_ok=True)
+integration_lock = lock_path.open('a')
+fcntl.flock(integration_lock, fcntl.LOCK_EX)
 if options.rich and options.format != 'docx':
     parser.error('--rich is a DOCX fixture option')
 if options.untitled and options.in_place:
@@ -102,7 +108,10 @@ class DelayedAcknowledgement(base_handler):
 bridge.RequestHandlerClass = DelayedAcknowledgement
 threading.Thread(target=bridge.serve_forever, daemon=True).start()
 guid = '{F2C67A12-E94D-4EF6-8C32-20D71F3B0294}'
-plugins = data / 'onlyoffice/desktopeditors/sdkjs-plugins' / guid
+# Desktop 10 moved the native user plugin registry under the data/ subtree.
+app_version = subprocess.check_output(['flatpak', 'info', 'org.onlyoffice.desktopeditors'], text=True, env={**os.environ, 'LC_ALL': 'C'})
+major = int(re.search(r'Version:\s*(\d+)', app_version).group(1))
+plugins = data / ('onlyoffice/desktopeditors/data/sdkjs-plugins' if major >= 10 else 'onlyoffice/desktopeditors/sdkjs-plugins') / guid
 shutil.copytree('onlyoffice', plugins, dirs_exist_ok=True)
 (plugins / 'settings.js').write_text('window.TWODRIVE_BRIDGE=' + json.dumps({'url': f'http://127.0.0.1:{bridge.server_port}', 'token': settings.bridge_token}) + ';')
 extension = options.format
@@ -306,6 +315,12 @@ try:
                 break
             time.sleep(0.5)
             call('Page.getFrameTree', {})
+        if not plugin_context:
+            print('Isolated editor frames:', ev('Array.from(document.querySelectorAll("iframe")).map(f=>({id:f.id,src:f.src}))', editor_context), flush=True)
+            print('Isolated plugin registry:', ev('typeof AscDesktopEditor.GetPlugins === "function" ? AscDesktopEditor.GetPlugins() : "no registry method"', editor_context), flush=True)
+            print('Native plugin methods:', ev('Object.keys(AscDesktopEditor).filter(k=>/plugin/i.test(k))', editor_context), flush=True)
+            print('Generated plugin configurations:', [str(p.relative_to(root)) for p in root.rglob('config.json')], flush=True)
+            print('Isolated contexts:', list(contexts.values()), flush=True)
         assert plugin_context, 'plugin iframe did not load'
         print('Initial plugin state:', ev('document.getElementById("status").textContent', plugin_context), flush=True)
         detected = ev('document.getElementById("source").value', plugin_context)['result']['result']['value']
@@ -378,6 +393,17 @@ try:
         else:
             assert '副本' in saved_status and '原文档' in saved_status, saved_status
             print('PASS copy save explicitly retains the original document warning', flush=True)
+        # Polling, cursor events and retries can export the exact same model
+        # under a new HTTP revision. They must not reconvert/replace its file.
+        idle_fingerprint = (files[0].stat().st_ino, files[0].stat().st_mtime_ns, files[0].read_bytes())
+        for _ in range(12):
+            time.sleep(1)
+        after_idle = (files[0].stat().st_ino, files[0].stat().st_mtime_ns, files[0].read_bytes())
+        if after_idle != idle_fingerprint:
+            (PROJECT / ('.test-state/idle-before.' + extension)).write_bytes(idle_fingerprint[2])
+            (PROJECT / ('.test-state/idle-after.' + extension)).write_bytes(after_idle[2])
+        assert after_idle == idle_fingerprint, 'idle autosave rewrote the same document'
+        print('PASS unchanged native document remains byte/mtime/inode stable across idle polling', flush=True)
         if not options.in_place and (not options.untitled):
             with zipfile.ZipFile(fixture) as z:
                 assert not any((b'ONLYOFFICE actual unsaved edits' in z.read(n) for n in z.namelist() if n.endswith('.xml')))

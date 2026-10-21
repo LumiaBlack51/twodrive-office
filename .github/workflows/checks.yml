@@ -1,0 +1,25 @@
+name: Office checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python3 -m unittest discover -s tests -p 'test_*.py'
+      - run: node --test tests/onlyoffice*.test.js
+      - run: python3 scripts/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: twodrive-office-packages
+          path: dist/*
