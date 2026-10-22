@@ -2,7 +2,7 @@
 
 ONLYOFFICE Desktop Editors 和 LibreOffice 的 TwoDrive 自动保存插件，当前源码为 0.2.2 开发预览版（大课件保存确认修复）。
 
-源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。当前公开安装包与校验值见 [v0.2.1 Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.2.1)；0.2.2 尚未公开发布。
+源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。安装包、校验值与验证摘要见 [v0.2.2 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.2.2)。
 
 打开位于 TwoDrive 挂载目录内的文档后，会自动开启原位保存。目录外或未命名文档默认关闭，用户手动开启后保存当前编辑内容的副本。默认副本目录是 `~/TwoDrive/OneDrive/Office AutoSave`，用户可以在开启/保存时选择 TwoDrive 内的其他目录。
 

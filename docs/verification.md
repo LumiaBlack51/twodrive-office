@@ -200,3 +200,17 @@ python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format p
 现有插件导出完整办公文件并原子保存到本地目标；TwoDrive 的 `onedrive/upload.rs::upload_session_file` 从初始偏移顺序传完整文件，已确认片段可断点续传。[Graph createUploadSession](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession?view=graph-rest-1.0)要求完整上传后提交，分片与续传不是对上一文件版本的差量补丁；[普通内容上传](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0)同样提交文件二进制内容。
 
 本轮决定不增加传输机制修改。合并短时间修改、跳过未变化内容、避免重复写入仍有价值且已实现；若以后要降低真实上传字节，应另行评估云端协议与同步后端，并验证冲突、离线及恢复语义。在用户要求不修改 TwoDrive 的范围内，不能仅改插件就宣称实现微软式差量上传，也不以跳过部分 Graph 字节范围冒充差量保存。
+
+后续逐项识别这 11 份旧缓存：一份 20,020,108 字节 PPTX 与 10 月 19 日保全的恢复材料逐字节一致，历史数据库和清理保护名单均有记录；两份各 59,715 字节的 PNG 是同一图片的上传/下载缓存，SHA-256 相同；两份约 3.16 MB 的 PDF 为同一 68 页网络编程课件的不同内容，文档 ID/首屏主题一致但全文提取摘要与文件摘要不同；六份零字节缓存的身份对应三个 PDF 目标和三个回收站信息文件，当前/历史记录的实际内容已使用其他缓存路径，不是六个空白用户文档。完整私人文件名与映射仅在本机，不加入公开源码。
+
+保留原因可由昨日维护资料核实：上述 PPTX 是显式保护项，其余缓存当时均不足旧孤立缓存暂存流程要求的 24 小时，因此没有进入当次旧文件处理。创建上传缓存后切换代次的旧回收缺口会遗留这些无现表引用的路径；新维护只处理当前可释放记录及显式 retired_cache，不扫描追删任意来源不明的旧文件。具体 PNG/PDF 每次解除引用和空壳创建的应用调用流水未保留，不根据文件名前缀臆断是某一次 Office 操作造成。此次仍全部只读、未删除。
+
+差量同步的可行性边界：微软的 [MS-FSSHTTP 概述](https://learn.microsoft.com/en-us/openspecs/sharepoint_protocols/ms-fsshttp/6d078cbe-2651-43a0-b460-685ac3f14c45)公开了由客户端/服务器配合上传变化、跟踪分区和处理锁/合并冲突的机制。要采用这条路线，必须先验证目标账号、文件和认证可使用兼容的端点，再实现版本基线、分块/文档模型、条件提交、冲突及离线恢复；本机 OneDrive 是否向第三方开放适用端点尚未实测。自建中转服务可减少客户端到中转的传输，但中转若仍调用现有 Graph 内容 API，最后一段仍是完整文件上传，不能称为原生 OneDrive 差量保存。此处是条件评估，没有引入新的同步实现。
+
+### 0.2.2 GitHub 交付补记
+
+修复提交 `260b0e9ebebfa8e0033b29a516a7f1ddc40d3ad6` 随 [PR #3](https://github.com/LumiaBlack51/twodrive-office/pull/3) 合入 main，合并提交 `428e1ab8e779a17f30dabab3759e5002409e7622`。[PR checks](https://github.com/LumiaBlack51/twodrive-office/actions/runs/39750106495) 和[合并源 checks](https://github.com/LumiaBlack51/twodrive-office/actions/runs/39750229712) 均成功；不可移动的注解标签 v0.2.2 指向此合并源。
+
+[0.2.2 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.2.2) 已于 2026-10-22 16:50（Asia/Shanghai）公开。OXT/plugin 来自上述合并源的 Actions 制品，先验证制品摘要和原始包校验值，再逐项与源码文件字节核对。新增的 verification.json 说明实际应用测试、CI 来源及未验证范围；SHA256SUMS 覆盖两包和验证摘要。草稿公开前及公开后均核实完整四项附件的 uploaded 状态、大小、远端 SHA-256、注解标签对象与解析提交；保持预发布状态，不冒称稳定渠道。
+
+本机先前安装的程序文件已与此次 CI 包的源码内容一致；ZIP 容器时间不同不等于程序不一致。没有再次安装或启动编辑器，也没有修改 TwoDrive。此前段落“尚未公开发布”保留为当时状态，由本补记更新。
