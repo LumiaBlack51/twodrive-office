@@ -2,7 +2,7 @@
   "name": "TwoDrive AutoSave",
   "nameLocale": {"zh-CN": "TwoDrive 自动保存"},
   "guid": "asc.{F2C67A12-E94D-4EF6-8C32-20D71F3B0294}",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minVersion": "9.4.0",
   "variations": [{
     "description": "TwoDrive AutoSave",

@@ -141,3 +141,62 @@ LibreOffice 在跟踪/加载文档时执行同样的目录检查，经 `enable()
 用户授权修复、发布和清理后的本机部署：桥接 MainPID=0 时从已核实发布包更新用户 runtime，并更新 9.4/10.0 两种 ONLYOFFICE 插件目录布局。配置及连接文件字节保持一致；未启动编辑器、没有更改当前文档或重启服务。后续正常打开文档才加载新插件；LibreOffice 的用户 profile 未由此轮修改。
 
 真实 OneDrive 同步、网页 Microsoft Office 和本地编辑器的协作往返仍未执行；复杂真实 PPTX 与完整文档样本集合仍是验证边界。测试只使用合成临时文档。此前源快照中的“待发布”是当时状态，现由本补记更新，保留先前证据。
+
+## 0.2.2：大课件保存后的错误待保存状态 · 2026-10-22
+
+用户报告昨日升级后，PPTX 修改不能自动保存，同时打开 Office 文档期间 TwoDrive 持续显示同步。后续明确表现是“修改后星号和关闭提示一直在”，不将其记录成用户已执行手动保存。已逐字节核实本机两个插件目录及桥接 runtime 都与 0.2.1 一致；没有回退昨日的去重修复。
+
+### 根因与旧代码证据
+
+从现有本地缓存只读复制约 21 MB、163 页、293 个图片资源的 PPTX 到隔离测试目录。原始工作文件及真实挂载没有用于保存测试。0.2.1 在真实 Desktop 10 中开启并写入后，面板反复显示“上一版本已本地保存；新修改仍待保存”及“正在保存当前内容”，整轮保存断言失败。
+
+在没有新编辑的情况下连续读取两个原生快照，解码后均为 2,944,592 字节，仅有一个字节不同，位于 Core 的修改时间，秒数随导出推进。SDK 的 [CCore.toStream](https://github.com/ONLYOFFICE/sdkjs/blob/9d2138866d929be32f1d107e8b5bfae36156e097/common/Drawings/Format/Format.js#L14341) 每次将当前时间写入 Core 属性 5；[PPTY 写入器](https://github.com/ONLYOFFICE/sdkjs/blob/9d2138866d929be32f1d107e8b5bfae36156e097/common/Shapes/SerializeWriter.js#L1076) 用主表项 2 定位 Core。这与本机快照的实际结构及差异位置相符。
+
+昨日修复在桥接端比较完整转换产物并排除导出时间，已经阻止相同内容反复替换原文件；编辑器保存确认仍按原生快照字符串精确比较，遗漏了同一时间因素。小文档可能在同一秒完成确认，大文档的媒体导出与转换跨秒时则稳定暴露。此次为旧修复遗漏的相邻机制，没有证据表明昨日去重逻辑回归，也不能根据待保存提示认定用户先前编辑内容已经丢失。
+
+### 修复与保护
+
+保存确认在识别的 PPTY v1 内校验长度、30 项寻址表、主签名、唯一且有序的表地址、Core 记录边界和属性结构，只忽略 Core 属性 5 的 ISO 导出时间。幻灯片文本（包括文本中的日期）、媒体引用、标题/作者等其他属性及所有剩余字节继续比较；未知/损坏结构回退精确比较并保留未保存提示。没有修改编辑器时钟、模型属性、恢复检查点或实际写出的文件时间。
+
+原生保存进行中、嵌入编辑、未提交单元格输入及保存期间的新编辑仍保留警告；失败继续重试。0.2.1 的模型/媒体与完整转换包两层去重、挂载与目标复验及请求顺序保护保持不变。此逻辑仍属于 Desktop 原生适配器，不是公开 web 插件 API 的保证。
+
+### 实际验证
+
+- Python 31 项、Node 21 项通过；新增跨秒保存确认、同一撤销点中的真实内容/媒体/属性/日期文本变化及未知/损坏结构回归。0.2.2 OXT/plugin 构建通过，所有 manifest 与 runtime 版本一致。
+- Flatpak 10.0.0（原生 10.0.0.169）：上述大课件的临时副本原位自动保存通过，163 页与全部 293 个媒体资源的内容摘要/重数保持相同，实际新增编辑写入，编辑器与 Desktop 星号清除。首个成功确认额外延迟 1.2 秒，保证跨越导出时钟。
+- 12 秒空闲检查中文件内容、mtime、inode 保持不变；保存中新增编辑不被旧确认清除，新修改随后保存；成功写入但 HTTP 确认丢失后，无继续输入也能重试并清除提示；关闭开关、撤销/重做和原生窗口关闭保护均通过。
+- 应用运行在关闭 X11/Wayland socket、认证 TCP Xvfb、独立 XDG 数据/配置和原生实例端口中，交互前核实真实进程环境与测试文档身份。只清理专用进程组；没有启动用户桌面编辑器或保存真实 TwoDrive 文件。
+- 未重新验证旧 9.4、所有 Office 格式或真实 OneDrive 上传。本次确认修复了大课件的保存确认循环，不将本地副本测试描述成云端端到端同步或用户原始编辑历史恢复。
+
+复现命令（`--fixture` 始终先复制到临时目录，只读输入）：
+
+```bash
+python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format pptx --in-place --slow-save --race --fixture /path/to/local-read-only-input
+python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format pptx --slow-save
+```
+
+### TwoDrive 常亮同步的只读检查
+
+排查时用户的编辑器已关闭，`activity.json` 的 active 为空，文件表没有 writing/dirty/uploading 项，目标课件为 cached；这只表明当时没有在途活动，不能复原打开期间每个活动项或证明云端字节一致。
+
+现有 TwoDrive 的 `filesystem/fuse.rs::open` 将 O_RDWR/O_WRONLY 打开交给 `create_overwrite_upload`，`filesystem/writes.rs` 随即建立 kind=upload 的 ActivityGuard，持有句柄期间可以一直保留；托盘将任何这样的活动显示为 syncing。故即使尚未有新写入，Office 的可写文件或锁文件句柄也能造成常亮，图标本身不能证明持续上传或再次堆积副本。这是依据现有代码的机制解释；没有在真实挂载重新打开用户文件重现活动条目，也没有在本轮修改或重启 TwoDrive 本体。
+
+最后的真实 PPTX 副本回归同样通过：额外延迟首次确认后保存成功，空闲 12 秒文件内容/mtime/inode 不变，源文件字节不变，暂停后停止写入，原生关闭继续保护未保存的原文档。最终 31 项 Python、21 项 Node、构建及 diff 检查通过。
+
+本机已安装 0.2.2：从本轮构建包更新 9.4/10.0 两种插件目录，仅原生状态脚本与 manifest 有变化；runtime 仅更新版本标识，共替换 5 个文件。程序文件全部与包/源码逐字节核对，现有设置和两个连接文件摘要保持不变。仅保留这 5 个旧文件的小范围私有回退材料，没有复制用户缓存。安装时编辑器均已关闭、bridge MainPID=0，没有启动或重启编辑器、bridge、TwoDrive，也没有更改 Office 偏好。
+
+安装后复查无残留测试进程或临时测试目录，用户课件的缓存路径、大小和修改时间与排查开始一致，TwoDrive 活动及 writing/dirty/uploading 数均为零。新插件在下次正常打开文档时加载。0.2.2 尚未公开发布。
+
+### 用户编辑后的只读缓存核验与传输方案
+
+用户随后确认实际修改多次均成功，并要求暂不修改 TwoDrive。2026-10-22 16:42（Asia/Shanghai）只读核验当前 SQLite、缓存和活动记录；没有运行 prune、删除缓存、修改配置、重启服务或另造挂载文件。检查当时的 81 个普通缓存文件共 131,555,061 字节，逐个计算 SHA-256。
+
+- 16:35 以后的缓存只有当前课件一份，21,481,006 字节，状态 cached、无上传声明；修复前课件的旧缓存已不存在。未发现这轮编辑留下的重复 PPTX、Office 保存临时记录、转换临时目录或 ONLYOFFICE 恢复目录条目。retired_cache、活动列表及 writing/dirty/uploading/conflict 数均为零。
+- 另有 11 份没有当前文件表/上传声明/待删除表引用的旧缓存，共 26,452,799 字节，mtime/ctime 为 10 月 18—21 日。其中文件内容完全重复的只有六份空文件及两份各 59,715 字节的小文件；旧 PPTX 为 20 页，并非本轮 163 页课件。来源及恢复价值未在本轮排除，全部保留；不能称全机没有历史残留或都可安全删除。
+- 这里核验的是用户自行编辑后的本地结果，未进行真实 OneDrive 下载比对或抓包，不以 cached 状态断言云端字节一致。
+
+微软的 [AutoSave 说明](https://support.microsoft.com/en-us/office/collab-files/what-is-autosave)说明它面向 OneDrive/SharePoint 上的文档定期保存；[Office 集成配置](https://learn.microsoft.com/en-us/sharepoint/ideal-state-configuration#office-integration)明确说明差量同步可以只传变化，而非每次传整个文件。这取决于受支持的应用/云端集成，不能推广到任何 Office 文件路径或任意第三方同步客户端。
+
+现有插件导出完整办公文件并原子保存到本地目标；TwoDrive 的 `onedrive/upload.rs::upload_session_file` 从初始偏移顺序传完整文件，已确认片段可断点续传。[Graph createUploadSession](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession?view=graph-rest-1.0)要求完整上传后提交，分片与续传不是对上一文件版本的差量补丁；[普通内容上传](https://learn.microsoft.com/en-us/graph/api/driveitem-put-content?view=graph-rest-1.0)同样提交文件二进制内容。
+
+本轮决定不增加传输机制修改。合并短时间修改、跳过未变化内容、避免重复写入仍有价值且已实现；若以后要降低真实上传字节，应另行评估云端协议与同步后端，并验证冲突、离线及恢复语义。在用户要求不修改 TwoDrive 的范围内，不能仅改插件就宣称实现微软式差量上传，也不以跳过部分 Graph 字节范围冒充差量保存。
