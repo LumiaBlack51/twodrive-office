@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {AutoSave} = require("../onlyoffice/autosave.js");
-const {markSaved} = require("../onlyoffice/native-state.js");
+const {markSaved, sameSnapshot} = require("../onlyoffice/native-state.js");
 const content = text => new TextEncoder().encode(text).buffer;
 
 test("opening an unchanged document enables scheduling without exporting or rewriting it", async () => {
@@ -124,6 +124,57 @@ function desktopFixture() {
     };
     return {Asc: {editor}, AscCommon: {History: history}, AscDesktopEditor: desktop};
 }
+
+function presentationSnapshot(modified, title = "Clock regression", body = "slide text and picture bytes") {
+    const integer = n => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
+    const attribute = (id, text) => Buffer.concat([Buffer.from([id]), integer(text.length), Buffer.from(text, "utf16le")]);
+    const attributes = Buffer.concat([Buffer.from([250]), attribute(0, title), attribute(5, modified), Buffer.from([251])]);
+    const core = Buffer.concat([Buffer.from([2]), integer(attributes.length), attributes]);
+    const table = Buffer.alloc(150);
+    table[0] = 255; table.writeUInt32LE(150, 1);
+    table[5] = 2; table.writeUInt32LE(158, 6);
+    table[10] = 3; table.writeUInt32LE(158 + core.length, 11);
+    const bytes = Buffer.concat([table, integer(0x50505459), integer(0), core, Buffer.from(body)]);
+    return "PPTY;v1;" + bytes.length + ";" + bytes.toString("base64");
+}
+
+test("a presentation save crossing the export clock still clears the native warning", () => {
+    const window = desktopFixture();
+    window.Asc.editor.binary = presentationSnapshot("2026-10-22T08:00:02Z");
+    assert.equal(markSaved(window, presentationSnapshot("2026-10-22T08:00:00Z")), "saved");
+    assert.equal(window.Asc.editor.isDocumentModified(), false);
+    assert.equal(window.AscDesktopEditor.nativeDirty, false);
+    assert.equal(window.AscCommon.History.recovery, 0);
+});
+
+test("clock comparison retains slide, media and Core property edits at the same undo point", () => {
+    const clock = "2026-10-22T08:00:00Z";
+    const committed = presentationSnapshot(clock);
+    for (const edited of [presentationSnapshot(clock, "New title"), presentationSnapshot(clock, undefined, "new picture bytes"),
+        presentationSnapshot(clock, undefined, "slide text " + clock), presentationSnapshot(clock, undefined, "slide text 2026-10-22T08:00:02Z")]) {
+        const window = desktopFixture();
+        window.Asc.editor.binary = edited;
+        assert.equal(markSaved(window, committed), "pending");
+        assert.equal(window.AscCommon.History.saved, 0);
+        assert.equal(window.AscDesktopEditor.nativeDirty, true);
+    }
+    assert.equal(sameSnapshot(presentationSnapshot(clock, undefined, "slide text " + clock),
+        presentationSnapshot(clock, undefined, "slide text 2026-10-22T08:00:02Z")), false);
+});
+
+test("unrecognized or damaged native layouts use exact comparison", () => {
+    const a = presentationSnapshot("2026-10-22T08:00:00Z"), b = presentationSnapshot("2026-10-22T08:00:02Z");
+    for (const transform of [s => s.replace(";v1;", ";v2;"), s => s.replace(/^PPTY/, "DOCY"),
+        s => s.slice(0, -8), s => s.replace(/^PPTY;v1;\d+;/, "PPTY;v1;1;")]) {
+        assert.equal(sameSnapshot(transform(a), transform(b)), false);
+    }
+    const damage = s => {
+        const parts = s.split(";"), data = Buffer.from(parts[3], "base64");
+        data.writeUInt32LE(150, 6); // Core overlaps the main table.
+        return parts.slice(0, 3).join(";") + ";" + data.toString("base64");
+    };
+    assert.equal(sameSnapshot(damage(a), damage(b)), false);
+});
 
 test("matching committed snapshot clears native and editor warnings while preserving recovery and undo/redo", () => {
     const window = desktopFixture(), editor = window.Asc.editor, history = window.AscCommon.History;

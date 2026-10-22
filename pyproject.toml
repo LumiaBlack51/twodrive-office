@@ -1,6 +1,6 @@
 [project]
 name = "twodrive-office"
-version = "0.2.1"
+version = "0.2.2"
 description = "TwoDrive AutoSave extensions for LibreOffice and ONLYOFFICE Desktop Editors"
 requires-python = ">=3.10"
 dependencies = []

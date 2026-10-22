@@ -17,6 +17,8 @@ parser.add_argument('--rich', action='store_true')
 parser.add_argument('--in-place', action='store_true')
 parser.add_argument('--untitled', action='store_true')
 parser.add_argument('--race', action='store_true', help='Edit again while the bridge delays acknowledgement')
+parser.add_argument('--fixture', type=Path, help='Read an existing document into a temporary test copy; never edit the supplied path')
+parser.add_argument('--slow-save', action='store_true', help='Delay the first saved acknowledgement across the native export clock')
 options = parser.parse_args()
 # The native debug switch uses a shared loopback port on current Desktop.
 # Serialize this suite rather than attaching to another test's editor.
@@ -99,6 +101,9 @@ base_handler = bridge.RequestHandlerClass
 
 class DelayedAcknowledgement(base_handler):
     def respond(self, status, data):
+        if data.get('status') == 'saved_local' and options.slow_save:
+            options.slow_save = False
+            time.sleep(1.2)
         if data.get('status') == 'saved_local' and delay_ack.is_set():
             delay_ack.clear()
             ack_written.set()
@@ -140,6 +145,8 @@ if extension != 'docx':
     app_root = Path(subprocess.check_output(['flatpak', 'info', '--show-location', 'org.onlyoffice.desktopeditors'], text=True).strip())
     template = app_root / 'files/bin/opt/onlyoffice/desktopeditors/converter/empty/en-US' / ('new.' + extension)
     shutil.copyfile(template, fixture)
+if options.fixture:
+    shutil.copyfile(options.fixture.resolve(), fixture)
 original_bytes = fixture.read_bytes()
 auth = root / 'xauthority'
 cookie = os.urandom(16).hex()
@@ -377,6 +384,14 @@ try:
             if files and saved_status.startswith('已保存到'):
                 with zipfile.ZipFile(files[0]) as z:
                     if any((b'ONLYOFFICE actual unsaved edits' in z.read(n) for n in z.namelist() if n.endswith('.xml'))):
+                        if options.fixture and extension == 'pptx':
+                            import collections, hashlib, io
+                            with zipfile.ZipFile(io.BytesIO(original_bytes)) as original:
+                                slides = lambda archive: sum(bool(re.fullmatch(r'ppt/slides/slide\d+\.xml', n)) for n in archive.namelist())
+                                images = lambda archive: collections.Counter(hashlib.sha256(archive.read(n)).hexdigest() for n in archive.namelist() if n.startswith('ppt/media/'))
+                                assert slides(z) == slides(original), 'Existing slides were lost'
+                                assert images(z) == images(original), 'Existing picture bytes were changed or lost'
+                            print('PASS existing presentation slide count and all embedded media bytes preserved', flush=True)
                         print('PASS real ONLYOFFICE saves current edits ' + ('in place' if options.in_place else 'to selected copy path'), flush=True)
                         if options.rich:
                             images = [n for n in z.namelist() if n.startswith('word/media/') and n.endswith('.png')]
