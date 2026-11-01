@@ -251,4 +251,4 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 
 合并前已检查本 PR 的 comments 和 review threads：当时只有 Copilot 配额提示，尚无 Dot 回复，不能声称 Dot 已独立批准插件。TwoDrive 的独立 [PR #55](https://github.com/LumiaBlack51/twodrive/pull/55) 最新提交则已收到 [Dot 无剩余阻断意见](https://github.com/LumiaBlack51/twodrive/pull/55#issuecomment-6556722306)，所有必需检查、真实 mock FUSE 与标准 Debian 制品门控通过后合入 main；[0.2.22-1 stable](https://github.com/LumiaBlack51/twodrive/releases/tag/v0.2.22-1) 已于 18:47:30 发布并从正式包更新本机 CLI/daemon。运行中 daemon 摘要与包一致，配置/凭据和自定义 service 保留，挂载正常，SQLite quick_check 为 ok。没有活动传输、待同步内容或打开的常规文件句柄时才执行后台升级；未重放真实 OneDrive 空开/保存，也不据模拟结果声称真实云端字节完全一致。
 
-收尾只清理本轮 Cargo target、独立工作树、CI 包/源码解包及测试容器、临时脚本和日志；保留必要配置/SQLite/队列、一套旧程序及已有独有恢复资料，不扫描删除用户缓存。精确清理结果待最终门控后更新。
+收尾只清理本轮 Cargo target、独立工作树、CI 包/源码解包及测试容器、临时脚本和日志；保留必要配置/SQLite/队列、一套旧程序及已有独有恢复资料，不扫描删除用户缓存。已移除本轮 Cargo target、CI/源码解包、测试容器、旧码复现 worktree、本轮测试日志和字节码；被统计的已删 payload 路径分配占用为 1,982,590,976 字节，不冒称整盘净空闲变化。仅保留等待文档 PR 门控的小型源工作树，合入后移除；历史私人审计/独有恢复材料、用户缓存和必要回退状态保持不变。
