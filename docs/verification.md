@@ -236,8 +236,8 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 - 所有应用测试使用独立 profile、临时文档和模拟挂载；ONLYOFFICE 使用禁用 X11/Wayland socket 的认证 TCP Xvfb，并核实进程 DISPLAY、XDG 与私有 native instance port。仅清理测试进程组，没有启动用户前台编辑器或使用真实云端文件保存测试。
 - 仍依赖已验证的 Desktop native adapter，而非公开 web 插件 API；未重新验证 9.4、复杂文档全集及真实 OneDrive 端到端。全量上传协议未改变；降低的是提交频率。
 
-### 配套 TwoDrive 修复
+### TwoDrive 机制调查（不属于本轮插件交付）
 
-TwoDrive 0.2.22 候选将非截断可写 open 与真实写入分开：不标 Writing、不建立 upload activity、不在未写入 release 时排队；首次 write/ftruncate 才启动原有写入流程，并验证缓存/远端基线。新建/截断和真实修改继续提交。旧 0.2.21 源的新增回归实际失败于“open is not an upload”；修复候选通过。源码在独立 worktree 完成，未修改另一个开发目录的未提交文件。
+未合并的 TwoDrive 候选将非截断可写 open 与真实写入分开：不标 Writing、不建立 upload activity、不在未写入 release 时排队；首次 write/ftruncate 才启动原有写入流程，并验证缓存/远端基线。新建/截断和真实修改继续提交。旧 0.2.21 源的新增回归实际失败于“open is not an upload”；修复候选通过。源码在独立 worktree 完成，未修改另一个开发目录的未提交文件。
 
-本机尝试专用临时 FUSE 挂载测试时 fusermount3 返回 Operation not permitted；这次挂载测试未通过，不能列为本机实测成功。专用挂载回归已加入 Linux CI，结果及两库 PR/Release 交付在完成后补记。真实 OneDrive 无写入测试。
+本机尝试专用临时 FUSE 挂载测试时 fusermount3 返回 Operation not permitted，不能列为本机实测成功。独立候选的 Linux CI 成功挂载后，真实写入完成断言超时，尚未通过完整集成门控。用户指出当前是插件项目后，已停止并关闭 TwoDrive PR #55，取消余下候选构建；没有合并、发布或安装 TwoDrive，也没有操作其运行服务。本轮仅发布 Office 插件/runtime。插件可控制自身导出与提交，不能拦截编辑器原生可写 open/release 的底层上传。真实 OneDrive 无写入测试。
