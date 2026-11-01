@@ -280,7 +280,12 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
                 self.send_header("Access-Control-Allow-Origin", self.headers["Origin"])
                 self.send_header("Vary", "Origin")
             self.end_headers()
-            self.wfile.write(payload)
+            try:
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionResetError):
+                # A closing editor may leave before reading DELETE's reply.
+                # The durable close/publication already completed above.
+                pass
             self.close_connection = True
 
         def trusted_host(self):
