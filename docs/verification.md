@@ -214,3 +214,30 @@ python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format p
 [0.2.2 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.2.2) 已于 2026-10-22 16:50（Asia/Shanghai）公开。OXT/plugin 来自上述合并源的 Actions 制品，先验证制品摘要和原始包校验值，再逐项与源码文件字节核对。新增的 verification.json 说明实际应用测试、CI 来源及未验证范围；SHA256SUMS 覆盖两包和验证摘要。草稿公开前及公开后均核实完整四项附件的 uploaded 状态、大小、远端 SHA-256、注解标签对象与解析提交；保持预发布状态，不冒称稳定渠道。
 
 本机先前安装的程序文件已与此次 CI 包的源码内容一致；ZIP 容器时间不同不等于程序不一致。没有再次安装或启动编辑器，也没有修改 TwoDrive。此前段落“尚未公开发布”保留为当时状态，由本补记更新。
+
+
+## 0.3.0：本地持久保存与定时挂载提交 · 2026-11-01
+
+用户再次报告空开关闭也上传、编辑时多次全量上传。0.2.1/0.2.2 的内容去重仍有效，但只覆盖插件写回；TwoDrive 的可写 open/release 仍可把未写入句柄排入上传。另一个独立原因是插件每秒直接保存挂载，真实变更每次仍会触发全文件传输。
+
+### 行为与恢复边界
+
+修改先以 0600 文件与原子清单、文件/目录 fsync 保存在挂载外的 XDG_STATE_HOME/twodrive-office/pending。目标每 180 秒提交最新本地版本，连续输入不会无限推迟；关闭/暂停或“立即保存”提前提交。定时器仍复验挂载、路径/符号链接和目标指纹，失败保留内容并退避。只在本地持久保存收到确认且原生快照仍相同时清除原位模式保存标记。副本模式保留原文档提示。目标原文件可落后本地版本一个周期；Ctrl+S 可绕过插件间隔。
+
+关闭时提交失败，bridge 保留队列并继续重试。崩溃后的清单会保留并阻止同目标会话覆盖；只有所有 Office 进程退出后，按需 bridge 或显式 CLI recover 才允许恢复。LibreOffice 退出后的未完成内容可用 pending/recover 查看/重试。不会在已载入旧模型时悄悄恢复文件，然后允许该旧模型覆盖恢复内容。冲突需人工选择版本，原始内容继续保留。
+
+LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判外部修改，headless store 返回 0x11b。现仅把中间版本导出到私有本地目录；定时原位提交在 UNO UI 线程通过 native storeSelf 更新真实 medium，使用 AbortInteraction 拒绝后台对话框。Writer 原位保存及其后 Ctrl+S 回归通过。副本及崩溃后的离线恢复继续使用受保护的原子写入。挂载临时文件的 fd 保持打开到 rename 完成，避免 close 提前把中间文件名送入上传。
+
+### 本轮实际验证
+
+- Python 40 项、Node 21 项与 0.3.0 OXT/plugin 构建通过。新增真实文件系统回归覆盖 180 次连续本地修改只在周期末发布最新版本、空开关闭不写入、失败关闭/重启恢复、旧模型恢复门控、断挂载/外部冲突、跨编辑器互斥、显式原生保存、清单写失败和 rename 之前保持上传句柄打开。
+- ONLYOFFICE Flatpak 10.0.0：合成 PPTX 原位保存（延迟/丢失确认、并发新编辑）、带 PNG 的 DOCX 原位保存、XLSX 原位保存均通过。真实编辑先写到挂载外完整办公文件，默认间隔内原文件字节保持不变；之后强制发布/加速间隔验证真实内容、保存标记、12 秒空闲稳定、撤销/重做、暂停及原生关闭保护。180 秒边界使用可控单调时钟回归验证，没有冒称每个 GUI 样本实等三分钟。
+- LibreOffice 26.2.5.2：0.3.0.oxt 注册/加载在独立 headless profile；Writer 原位、随后原生 Ctrl+S、暂停、目录外/未命名副本、Calc XLSX、Impress PPTX 当前内容导出与源保护通过。实际周期测试配置为 1 秒；副本测试额外确认首次本地导出尚未写入挂载。
+- 所有应用测试使用独立 profile、临时文档和模拟挂载；ONLYOFFICE 使用禁用 X11/Wayland socket 的认证 TCP Xvfb，并核实进程 DISPLAY、XDG 与私有 native instance port。仅清理测试进程组，没有启动用户前台编辑器或使用真实云端文件保存测试。
+- 仍依赖已验证的 Desktop native adapter，而非公开 web 插件 API；未重新验证 9.4、复杂文档全集及真实 OneDrive 端到端。全量上传协议未改变；降低的是提交频率。
+
+### 配套 TwoDrive 修复
+
+TwoDrive 0.2.22 候选将非截断可写 open 与真实写入分开：不标 Writing、不建立 upload activity、不在未写入 release 时排队；首次 write/ftruncate 才启动原有写入流程，并验证缓存/远端基线。新建/截断和真实修改继续提交。旧 0.2.21 源的新增回归实际失败于“open is not an upload”；修复候选通过。源码在独立 worktree 完成，未修改另一个开发目录的未提交文件。
+
+本机尝试专用临时 FUSE 挂载测试时 fusermount3 返回 Operation not permitted；这次挂载测试未通过，不能列为本机实测成功。专用挂载回归已加入 Linux CI，结果及两库 PR/Release 交付在完成后补记。真实 OneDrive 无写入测试。

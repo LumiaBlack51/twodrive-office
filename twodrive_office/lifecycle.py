@@ -36,8 +36,9 @@ class Activity:
 
 class OfficePresence:
     """Check only while the bridge runs; no separate process or login poller."""
-    def __init__(self, proc=Path("/proc"), clock=time.monotonic):
+    def __init__(self, proc=Path("/proc"), clock=time.monotonic, names=("DesktopEditors", "desktopeditors")):
         self.proc, self.clock = proc, clock
+        self.names = names
         self.checked_at = float("-inf")
         self.present = False
 
@@ -53,7 +54,7 @@ class OfficePresence:
             try:
                 if process.stat().st_uid != os.getuid():
                     continue
-                if (process / "comm").read_text().strip() in ("DesktopEditors", "desktopeditors"):
+                if (process / "comm").read_text().strip() in self.names:
                     self.present = True
                     break
             except (FileNotFoundError, PermissionError, ProcessLookupError):

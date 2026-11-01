@@ -54,10 +54,10 @@ def main():
         mount = temp / "mount"
         mount.mkdir()
         settings = Settings(mount, mount / "Office AutoSave", debounce_seconds=0.25,
-                            max_wait_seconds=1, require_mount=False)
+                            max_wait_seconds=1, require_mount=False, sync_interval_seconds=1)
         settings.save(config_root / "twodrive-office/settings.json")
         profile = temp / "lo-profile"
-        env = {**os.environ, "XDG_CONFIG_HOME": str(config_root), "SAL_USE_VCLPLUGIN": "svp", "TWODRIVE_OFFICE_DEBUG": "1"}
+        env = {**os.environ, "XDG_CONFIG_HOME": str(config_root), "XDG_STATE_HOME": str(temp / "state"), "SAL_USE_VCLPLUGIN": "svp", "TWODRIVE_OFFICE_DEBUG": "1"}
         package = ROOT / "dist" / f"twodrive-autosave-{__version__}.oxt"
         subprocess.run(["unopkg", "-env:UserInstallation=" + profile.as_uri(), "add", "--force", str(package)],
                        env=env, check=True, capture_output=True, timeout=30)
@@ -141,6 +141,8 @@ def main():
                 class TestManager:
                     def __init__(self):
                         self.settings, self.states = settings, []
+                        from twodrive_office.local_save import LocalSaveQueue
+                        self.local_saves = LocalSaveQueue(settings, temp / 'adapter-state')
                     def refresh(self):
                         pass
                 test_manager = TestManager()
@@ -158,6 +160,9 @@ def main():
                     copy_doc.Text.String = "exported-current-edits"
                     state.save()
                     assert not state.error, state.error
+                    assert not state.plan.target.exists(), 'Local autosave wrote the mount before publication'
+                    assert contains(state.local.blob, "exported-current-edits")
+                    state.local.publish(force=True)
                     assert contains(state.plan.target, "exported-current-edits")
                     assert outside.read_bytes() == before
                     assert copy_doc.getURL() == outside.as_uri()
@@ -180,6 +185,7 @@ def main():
                     state.enable()
                     state.save()
                     assert not state.error, state.error
+                    state.local.publish(force=True)
                     assert contains(state.plan.target, "untitled-current-edits")
                     assert blank.getURL() == "" and blank.isModified()
                     print("PASS untitled document exports without changing identity", flush=True)
@@ -216,6 +222,7 @@ def main():
                         before_modified = other.isModified()
                         state.save()
                         assert not state.error, state.error
+                        state.local.publish(force=True)
                         with zipfile.ZipFile(state.plan.target) as archive:
                             assert any(("current-" + extension_name + "-edits").encode() in archive.read(name)
                                        for name in archive.namelist() if name.endswith(".xml"))

@@ -4,6 +4,7 @@ import os
 import threading
 import time
 import uuid
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -19,6 +20,8 @@ from com.sun.star.util import XModifyListener
 
 from twodrive_office.policy import Settings, SaveError, check_source, fingerprint, plan_save, prepare_target, normalized, within
 from twodrive_office.scheduler import PendingSave
+from twodrive_office.local_save import LocalSaveQueue
+from twodrive_office.bridge import validate_document, document_content_digest
 
 IMPLEMENTATION = "org.twodrive.office.AutoSave"
 PROTOCOL = "twodrive:"
@@ -46,7 +49,8 @@ class DocumentState(unohelper.Base, XModifyListener):
         self.manager, self.document = manager, document
         self.document_id = str(uuid.uuid4())
         self.enabled = self.saving = self.closed = False
-        self.plan = self.expected = None
+        self.plan = self.expected = self.local = None
+        self.content_digest = None
         self.error = ""
         self.status = "自动保存：关"
         self.auto_source = None
@@ -59,6 +63,8 @@ class DocumentState(unohelper.Base, XModifyListener):
             self.pending.changed(time.monotonic())
 
     def disposing(self, event):
+        if self.local:
+            self.manager.local_saves.close(self.local)
         self.closed = True
         self.enabled = False
         self.manager.states = [state for state in self.manager.states if state is not self]
@@ -118,11 +124,33 @@ class DocumentState(unohelper.Base, XModifyListener):
         if any(p.Name in ("Password", "EncryptionData") and p.Value for p in self.document.getArgs()):
             raise SaveError("加密文档暂不支持自动保存，请手动保存")
         self.expected = fingerprint(self.plan.target)
+        if self.local:
+            self.manager.local_saves.close(self.local)
+        self.manager.local_saves.settings = self.manager.settings
+        self.local = self.manager.local_saves.open(self.plan, self.expected)
+        if self.plan.in_place:
+            self.local.writer = self.publish_original
+        self.content_digest = None
         self.enabled_source = source
         self.pending = PendingSave(self.manager.settings.debounce_seconds, self.manager.settings.max_wait_seconds)
         self.enabled, self.error = True, ""
         self.pending.changed(time.monotonic())
         self.status = "自动保存：开，待保存"
+
+    def publish_original(self):
+        # Keep LibreOffice's native medium/file identity current. Replacing its
+        # file behind its back would make the next Ctrl+S ask about an external
+        # modification. This callback is invoked only on the UNO UI thread.
+        if self.source() != self.enabled_source or self.closed or self.document.isModified():
+            raise SaveError("新修改仍待本地保存；已有本地版本继续保留")
+        self.saving = True
+        try:
+            self.document.storeSelf((prop("InteractionHandler", AbortInteraction()),))
+            return fingerprint(self.plan.target)
+        except Exception as exc:
+            raise SaveError("提交 TwoDrive 失败；本地版本继续保留") from exc
+        finally:
+            self.saving = False
 
     def save(self):
         if not self.enabled or self.closed or self.saving:
@@ -136,28 +164,31 @@ class DocumentState(unohelper.Base, XModifyListener):
                 self.enabled = False
                 raise SaveError("文档已另存为新文件，请重新开启自动保存")
             check_source(current_source)
-            prepare_target(self.manager.settings, self.plan)
-            if fingerprint(self.plan.target) != self.expected:
-                # A normal Ctrl+S is legitimate; OnSaveDone refreshes expected below.
-                raise SaveError("目标文件被其他程序修改，请检查后重新开启自动保存")
+            self.local.validate()
             common = (prop("InteractionHandler", AbortInteraction()),)
-            if self.plan.in_place:
-                self.document.storeSelf(common)
-            else:
-                filters = {"odt": "writer8", "ods": "calc8", "odp": "impress8",
-                           "docx": "Office Open XML Text", "xlsx": "Calc MS Excel 2007 XML",
-                           "pptx": "Impress MS PowerPoint 2007 XML"}
-                args = common + (prop("Overwrite", True), prop("FilterName", filters[self.plan.extension]))
-                was_modified = self.document.isModified()
+            filters = {"odt": "writer8", "ods": "calc8", "odp": "impress8",
+                       "docx": "Office Open XML Text", "xlsx": "Calc MS Excel 2007 XML",
+                       "pptx": "Impress MS PowerPoint 2007 XML"}
+            args = common + (prop("Overwrite", True), prop("FilterName", filters[self.plan.extension]))
+            was_modified = self.document.isModified()
+            with tempfile.TemporaryDirectory(prefix="export-", dir=self.local.directory) as directory:
+                target = Path(directory) / ("current." + self.plan.extension)
                 try:
-                    self.document.storeToURL(uno.systemPathToFileUrl(str(self.plan.target)), args)
+                    self.document.storeToURL(uno.systemPathToFileUrl(str(target)), args)
                 finally:
                     # Preserve the original's state even if an export filter changes it.
                     if self.document.isModified() != was_modified:
                         self.document.setModified(was_modified)
-            self.expected = fingerprint(self.plan.target)
+                content = target.read_bytes()
+                validate_document(content, self.plan.extension)
+                digest = document_content_digest(content, self.plan.extension)
+                if digest != self.content_digest:
+                    self.local.stage(content)
+                    self.content_digest = digest
+            if self.plan.in_place:
+                self.document.setModified(False)
             self.pending.succeeded(revision, now)
-            self.status, self.error = "已本地保存，云端由 TwoDrive 同步", ""
+            self.status, self.error = "已保存本地待同步版本；定时及关闭时提交 TwoDrive", ""
         except Exception as exc:
             if os.environ.get("TWODRIVE_OFFICE_DEBUG") == "1":
                 import traceback
@@ -174,6 +205,7 @@ class Manager(unohelper.Base, XCallback, XDocumentEventListener):
     def __init__(self, context):
         self.context = context
         self.settings = Settings.load()
+        self.local_saves = LocalSaveQueue(self.settings)
         services = context.ServiceManager
         self.desktop = services.createInstanceWithContext("com.sun.star.frame.Desktop", context)
         self.callback = services.createInstanceWithContext("com.sun.star.awt.AsyncCallback", context)
@@ -211,7 +243,7 @@ class Manager(unohelper.Base, XCallback, XDocumentEventListener):
     def timer(self):
         while self.running:
             time.sleep(0.25)
-            if not self.queued and any(s.enabled for s in self.states):
+            if not self.queued and (any(s.enabled for s in self.states) or self.local_saves.pending()):
                 self.queued = True
                 try:
                     self.callback.addCallback(self, None)
@@ -224,6 +256,12 @@ class Manager(unohelper.Base, XCallback, XDocumentEventListener):
         for state in list(self.states):
             if state.enabled and not state.closed and state.pending.due(now):
                 state.save()
+        self.local_saves.tick()
+        for state in self.states:
+            if state.local and state.local.error:
+                state.status = "本地版本已保留；提交 TwoDrive 失败：" + state.local.error
+            elif state.local and not state.local.blob and state.content_digest:
+                state.status = "已提交 TwoDrive，等待云端同步"
 
     def documentEventOccured(self, event):
         if event.EventName in ("OnLoad", "OnNew", "OnViewCreated"):
@@ -235,12 +273,18 @@ class Manager(unohelper.Base, XCallback, XDocumentEventListener):
             state = next((s for s in self.states if s.document == event.Source), None)
             if state and state.enabled and state.pending.revision > state.pending.saved_revision:
                 state.save()
+            if state and state.local:
+                try:
+                    state.local.publish(force=True)
+                except (SaveError, OSError):
+                    pass
         elif event.EventName in ("OnSaveDone", "OnSaveAsDone"):
             state = next((s for s in self.states if s.document == event.Source), None)
             if state and not state.enabled:
                 state.auto_enable()
             if state and state.enabled and state.plan.in_place and not state.saving:
                 state.expected = fingerprint(state.plan.target)
+                state.local.native_saved()
                 state.pending.succeeded(state.pending.revision, time.monotonic())
                 state.status, state.error = "已本地保存，云端由 TwoDrive 同步", ""
         self.refresh()
@@ -313,7 +357,14 @@ class AutoSave(unohelper.Base, XJob, XJobExecutor, XDispatchProvider, XDispatch,
             action = url.Path
             if action == "Toggle":
                 if state.enabled:
+                    if state.pending.revision > state.pending.saved_revision:
+                        state.save()
+                    instance.local_saves.close(state.local)
+                    retained = bool(state.local.blob)
+                    state.local = None
                     state.enabled, state.status = False, "自动保存：关"
+                    if retained:
+                        state.status = "自动保存：关；本地待同步版本已保留"
                     state.manually_disabled = True
                 else:
                     source = state.source()
@@ -335,6 +386,9 @@ class AutoSave(unohelper.Base, XJob, XJobExecutor, XDispatchProvider, XDispatch,
                 if state.enabled:
                     state.pending.changed(time.monotonic())
                     state.save()
+                    if not state.error:
+                        state.local.publish(force=True)
+                        state.status = "已提交 TwoDrive，等待云端同步"
             elif action == "Status":
                 target = str(state.plan.target) if state.plan else "尚未开启"
                 instance.message(state, state.status + "\n\n保存位置：" + target)
