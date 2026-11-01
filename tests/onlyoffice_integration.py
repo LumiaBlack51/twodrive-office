@@ -95,7 +95,7 @@ cache = root / 'cache'
 mount = root / 'mount'
 mount.mkdir(exist_ok=True)
 settings = Settings(mount, mount / 'Office AutoSave', require_mount=False, bridge_token='isolated-test-token-only-' + 'x' * 32)
-bridge = make_server(Bridge(settings), 0)
+bridge = make_server(Bridge(settings, state_root=root / 'state'), 0)
 delay_ack, ack_written, release_ack = threading.Event(), threading.Event(), threading.Event()
 base_handler = bridge.RequestHandlerClass
 
@@ -376,12 +376,31 @@ try:
         command = commands[extension]
         ev('new Promise(resolve=>Asc.plugin.callCommand(function(){' + command + '},false,true,()=>resolve(true)))', plugin_context)
         ev('if(typeof Asc.editor.UpdateInterfaceState === "function")Asc.editor.UpdateInterfaceState()', editor_context)
+        for attempt in range(50):
+            time.sleep(0.2)
+            records = [record for record in bridge.bridge.local_saves.records if record.blob]
+            if records:
+                break
+        assert records, 'Edits were not saved durably outside the mount'
+        assert fixture.read_bytes() == original_bytes, 'Local autosave prematurely wrote the mount'
+        assert all(record.blob.is_file() and mount not in record.blob.parents for record in records)
+        for record in records:
+            with zipfile.ZipFile(record.blob) as archive:
+                assert any(b'ONLYOFFICE actual unsaved edits' in archive.read(n) for n in archive.namelist() if n.endswith('.xml'))
+        print('PASS real edits durably staged outside mount; default interval leaves original untouched', flush=True)
+        # Close/force publication uses the same durable generation. Accelerate
+        # subsequent timing checks, without waiting three minutes per fixture.
+        from dataclasses import replace
+        bridge.bridge.settings = replace(settings, sync_interval_seconds=1)
+        for record in bridge.bridge.local_saves.records:
+            record.settings = replace(settings, sync_interval_seconds=1)
+            record.publish(force=True)
         for i in range(40):
             time.sleep(0.5)
             result = ev('({status:document.getElementById("status").textContent,target:document.getElementById("target").textContent,enabled:document.getElementById("enabled").checked})', plugin_context)
             files = [fixture] if options.in_place else list((mount / 'Chosen by user').glob('*.' + extension))
             saved_status = result.get('result', {}).get('result', {}).get('value', {}).get('status', '')
-            if files and saved_status.startswith('已保存到'):
+            if files and (saved_status.startswith('已保存本地') or saved_status.startswith('已提交')):
                 with zipfile.ZipFile(files[0]) as z:
                     if any((b'ONLYOFFICE actual unsaved edits' in z.read(n) for n in z.namelist() if n.endswith('.xml'))):
                         if options.fixture and extension == 'pptx':
@@ -403,10 +422,10 @@ try:
         state = ev('({modified:Asc.editor.isDocumentModified(),nativeDirty:window.testNativeDirty})', editor_context)['result']['result']['value']
         assert state == {'modified': not options.in_place, 'nativeDirty': not options.in_place}, 'Wrong editor/native saved state: ' + str(state) + ' ' + saved_status
         if options.in_place:
-            assert '编辑器状态已更新' in saved_status, saved_status
+            assert '编辑器状态已更新' in saved_status or saved_status.startswith('已提交'), saved_status
             print('PASS both editor dirty state and real native star notification are cleared', flush=True)
         else:
-            assert '副本' in saved_status and '原文档' in saved_status, saved_status
+            assert '原文档' in saved_status, saved_status
             print('PASS copy save explicitly retains the original document warning', flush=True)
         # Polling, cursor events and retries can export the exact same model
         # under a new HTTP revision. They must not reconvert/replace its file.
@@ -452,6 +471,8 @@ try:
                     break
             else:
                 raise AssertionError('New edit was not retried: ' + status)
+            for record in bridge.bridge.local_saves.records:
+                record.publish(force=True)
             with zipfile.ZipFile(files[0]) as z:
                 assert any(b'New edits during the delayed save' in z.read(name) for name in z.namelist() if name.endswith('.xml'))
             print('PASS newer edit is subsequently committed and acknowledged', flush=True)
@@ -478,6 +499,8 @@ try:
                     break
             else:
                 raise AssertionError('Lost-reply retry could not acknowledge without another edit: ' + status)
+            for record in bridge.bridge.local_saves.records:
+                record.publish(force=True)
             with zipfile.ZipFile(files[0]) as z:
                 assert any(b'Edit saved after a lost reply' in z.read(name) for name in z.namelist() if name.endswith('.xml'))
             print('PASS lost acknowledgement retains the warning and retries without further edits', flush=True)
@@ -522,6 +545,20 @@ try:
                 state = ev('({modified:Asc.editor.isDocumentModified(),nativeDirty:window.testNativeDirty})', editor_context)['result']['result']['value']
                 assert state == {'modified': dirty, 'nativeDirty': dirty}, action + ' lost the saved history point: ' + str(state)
             print('PASS real undo/redo preserves the saved point and native warning', flush=True)
+            bridge.bridge.settings = settings
+            ev('document.getElementById("enabled").checked=true;document.getElementById("enabled").dispatchEvent(new Event("change"));', plugin_context)
+            time.sleep(0.3)
+            close_command = command.replace('ONLYOFFICE actual unsaved edits', 'Pending revision on native close')
+            ev('new Promise(resolve=>Asc.plugin.callCommand(function(){' + close_command + '},false,true,()=>resolve(true)))', plugin_context)
+            ev('Asc.editor.UpdateInterfaceState()', editor_context)
+            for attempt in range(70):
+                time.sleep(0.2)
+                if bridge.bridge.local_saves.pending() and not ev('Asc.editor.isDocumentModified()', editor_context)['result']['result']['value']:
+                    break
+            else:
+                raise AssertionError('Close fixture did not reach durable local-only saved state')
+            with zipfile.ZipFile(files[0]) as archive:
+                assert not any(b'Pending revision on native close' in archive.read(n) for n in archive.namelist() if n.endswith('.xml'))
             close_test_window()
             for attempt in range(30):
                 time.sleep(0.2)
@@ -534,6 +571,15 @@ try:
             else:
                 raise AssertionError('Native close left the saved document open (possible save confirmation)')
             print('PASS native window close exits the saved document without a save confirmation', flush=True)
+            for attempt in range(30):
+                time.sleep(0.2)
+                with zipfile.ZipFile(files[0]) as archive:
+                    if any(b'Pending revision on native close' in archive.read(n) for n in archive.namelist() if n.endswith('.xml')):
+                        break
+            else:
+                raise AssertionError('Native close did not publish the latest staged revision')
+            assert not bridge.bridge.local_saves.pending()
+            print('PASS native close publishes the pending local revision before the periodic deadline', flush=True)
         else:
             close_test_window()
             time.sleep(1)
@@ -556,5 +602,6 @@ finally:
     stop_group(xvfb)
     bridge.shutdown()
     bridge.server_close()
+    bridge.bridge.local_saves.shutdown()
     shutil.rmtree(root)
     print('Only isolated test processes stopped; temporary data removed.', flush=True)

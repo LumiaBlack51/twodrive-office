@@ -29,6 +29,9 @@ class SavePolicyTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        state_env = patch.dict(os.environ, {"XDG_STATE_HOME": str(self.root / "state")})
+        state_env.start()
+        self.addCleanup(state_env.stop)
         self.mount = self.root / "mount"
         self.mount.mkdir()
         self.settings = Settings(self.mount, self.mount / "Office AutoSave", require_mount=False,
@@ -105,6 +108,25 @@ class SavePolicyTests(unittest.TestCase):
             atomic_write(self.settings, plan, docx("second"), expected)
         self.assertEqual(plan.target.read_bytes(), docx("first"))
         self.assertEqual(list(plan.target.parent.glob("*.tmp")), [])
+
+    def test_atomic_publication_renames_before_closing_the_upload_handle(self):
+        plan = self.plan()
+        real_replace = os.replace
+        observed = []
+        def replace_open_file(source, target):
+            inode = Path(source).stat().st_ino
+            opened = []
+            for descriptor in Path('/proc/self/fd').iterdir():
+                try:
+                    opened.append(descriptor.stat().st_ino)
+                except FileNotFoundError:
+                    pass
+            self.assertIn(inode, opened, 'Closing a FUSE temporary before rename can upload its intermediate name')
+            observed.append(True)
+            return real_replace(source, target)
+        with patch('os.replace', side_effect=replace_open_file):
+            atomic_write(self.settings, plan, docx('final'), None)
+        self.assertEqual(observed, [True])
 
     def test_symlink_target_and_format_mismatch(self):
         plan = self.plan()
@@ -285,6 +307,9 @@ class BridgeTests(unittest.TestCase):
             bridge.save_snapshot(session["session_id"], json.dumps({"revision": 2, "binary": "new"}).encode())
             release.set()
             worker.join(5)
+        self.assertFalse(Path(session["target"]).exists())
+        self.assertEqual(bridge.sessions[session["session_id"]].local.blob.read_bytes(), docx("new"))
+        bridge.flush(session["session_id"])
         self.assertEqual(Path(session["target"]).read_bytes(), docx("new"))
         self.assertEqual(results[0]["status"], "already_saved_newer")
 

@@ -5,7 +5,7 @@
     let session = null, engine = null, polling = null, ticking = null;
     let connecting = false, bridgeConnecting = false;
     let controlPanel = null, autoAttempted = false, disposed = false;
-    let snapshotRevision = 0;
+    let snapshotRevision = 0, locallySaved = false;
     const snapshots = new WeakMap();
     const documentId = crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random();
     let bridge = window.TWODRIVE_BRIDGE;
@@ -118,16 +118,20 @@
         const snapshot = snapshots.get(bytes);
         if (!snapshot || snapshot.session !== session || !result || result.status !== "saved_local" || result.target !== session.target)
             throw new Error("未收到此版本的写入确认，修改仍待保存");
-        if (!session.in_place) return "已保存到副本；原文档的保存状态未改变。云端同步由 TwoDrive 处理";
+        const pending = result.cloud_status === "pending_interval";
+        locallySaved = true;
+        $("target").textContent = "TwoDrive 目标：" + session.target + (pending ? "\n本地待同步版本：" + result.local_path : "");
+        const sync = pending ? "已保存本地待同步版本；约每 " + session.sync_interval_seconds + " 秒及关闭时提交 TwoDrive" : "已提交 TwoDrive，等待云端同步";
+        if (!session.in_place) return sync + "；原文档的保存状态未改变";
         if (sourcePath(window.parent.AscDesktopEditor) !== session.source_path)
             throw new Error("文档已另存为新文件，请重新开启自动保存");
         const state = window.TwoDriveNativeState.markSaved(window.parent, snapshot.binary);
         if (state === "pending") {
             engine.changed();
-            return "上一版本已保存到原文件；新修改仍待保存";
+            return "上一版本已本地保存；新修改仍待保存";
         }
-        if (state === "unsupported") return "已保存到原文件；此版本无法更新编辑器的未保存标记。云端同步由 TwoDrive 处理";
-        return "已保存到原文件，编辑器状态已更新；云端同步由 TwoDrive 处理";
+        if (state === "unsupported") return sync + "；此版本无法更新编辑器的未保存标记";
+        return sync + "；编辑器状态已更新";
     }
     function lockInputs(locked) {
         ["title", "format", "copy-directory", "choose-directory", "connect"].forEach(id => { $(id).disabled = locked; });
@@ -140,7 +144,12 @@
         session = null;
         lockInputs(false);
         report("自动保存：关");
-        if (old) await request("/sessions/" + old.session_id, {method: "DELETE"}).catch(() => {});
+        if (old) {
+            try {
+                const result = await request("/sessions/" + old.session_id, {method: "DELETE"});
+                if (!session && result.cloud_status === "pending_interval") report("自动保存：关；本地待同步版本已保留，提交失败后将重试");
+            } catch (_) { if (!session) report("自动保存：关；桥接未响应，已有本地版本继续保留"); }
+        }
     }
     async function toggle(automatic = false) {
         if (connecting) return;
@@ -172,6 +181,7 @@
                 return;
             }
             session = opened;
+            locallySaved = false;
             session.source_path = source;
             $("target").textContent = (session.in_place ? "原位保存：" : "保存副本：") + session.target;
             lockInputs(true);
@@ -236,7 +246,14 @@
         $("bridge-url").value = bridge.url;
         $("bridge-token").value = bridge.token;
         $("enabled").addEventListener("change", () => { autoAttempted = true; toggle(); });
-        $("save-now").addEventListener("click", () => { engine.changed(); engine.tick(true); });
+        $("save-now").addEventListener("click", async () => {
+            engine.changed();
+            await engine.tick(true);
+            if (session && engine.dueAt === null) {
+                try { await jsonPost("/sessions/" + session.session_id + "/flush", {}); report("已提交 TwoDrive，等待云端同步"); }
+                catch (error) { report("本地版本已保留；提交 TwoDrive 失败：" + error.message); }
+            }
+        });
         $("connect").addEventListener("click", () => connect());
         $("choose-directory").addEventListener("click", async () => {
             try { const result = await jsonPost("/pick-directory", {}); if (result.path) $("copy-directory").value = result.path; publish(); }
@@ -262,7 +279,21 @@
             if (engine.enabled) { $("enabled").checked = false; disable(); report("编辑权限改变，自动保存已停止，请检查后重新开启"); }
         });
         ticking = setInterval(() => engine.tick(), 250);
-        polling = setInterval(() => { if (engine.enabled && !engine.busy && engine.dueAt === null) changed(); }, 9000);
+        polling = setInterval(async () => {
+            if (!engine.enabled || engine.busy || engine.dueAt !== null) return;
+            changed();
+            if (!session || !locallySaved || engine.dueAt !== null) return;
+            const current = session;
+            try {
+                const result = await request("/sessions/" + current.session_id);
+                if (session !== current || engine.busy || engine.dueAt !== null) return;
+                if (result.sync_error) report("本地版本已保留；提交 TwoDrive 失败：" + result.sync_error);
+                else if (result.cloud_status === "managed_by_twodrive") {
+                    $("target").textContent = "TwoDrive 目标：" + current.target;
+                    report("已提交 TwoDrive，等待云端同步" + (current.in_place ? "" : "；原文档的保存状态未改变"));
+                }
+            } catch (_) { /* Local revisions stay durable when the bridge is unavailable. */ }
+        }, 9000);
         connect(true);
     };
     plugin.button = function () { if (controlPanel) { controlPanel.close(); controlPanel = null; } };

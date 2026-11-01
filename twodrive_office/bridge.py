@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 
 from .policy import Settings, SaveError, SavePlan, atomic_write, check_source, fingerprint, normalized, plan_save, prepare_target
 from .lifecycle import Activity
+from .local_save import LocalSaveQueue
 
 MAX_CONTENT = 128 * 1024 * 1024
 PLUGIN_ORIGINS = ("null", "file://", "onlyoffice://plugin")
@@ -95,16 +96,18 @@ class Session:
     content_digest: str | None = None
     touched: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    local: object = None
 
 
 class Bridge:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, state_root=None, clock=time.monotonic):
         settings.validate()
         if len(settings.bridge_token) < 32:
             raise SaveError("请先执行 configure，生成本地服务凭据")
         self.settings = settings
         self.sessions: dict[str, Session] = {}
         self.lock = threading.Lock()
+        self.local_saves = LocalSaveQueue(settings, state_root, clock)
 
     def create(self, data):
         plan = plan_save(self.settings, data.get("source_path"), data.get("title", "Untitled"),
@@ -119,17 +122,20 @@ class Bridge:
             if len(self.sessions) >= 100:
                 raise SaveError("打开的自动保存会话过多")
             key = secrets.token_urlsafe(24)
-            self.sessions[key] = Session(plan, fingerprint(plan.target), normalized(data["source_path"]) if data.get("source_path") else None)
+            expected = fingerprint(plan.target)
+            local = self.local_saves.open(plan, expected)
+            self.sessions[key] = Session(plan, expected, normalized(data["source_path"]) if data.get("source_path") else None, local=local)
         return {"session_id": key, "target": str(plan.target), "in_place": plan.in_place,
-                "extension": plan.extension}
+                "extension": plan.extension, "sync_interval_seconds": self.settings.sync_interval_seconds}
 
     def prune(self):
         now = time.monotonic()
         for key, session in list(self.sessions.items()):
             if now - session.touched > 3600 and not session.lock.locked():
+                self.local_saves.close(session.local)
                 del self.sessions[key]
 
-    def save(self, key: str, content: bytes, revision: int | None = None, *, snapshot_digest: str | None = None):
+    def save(self, key: str, content: bytes, revision: int | None = None, *, snapshot_digest: str | None = None, defer=False):
         with self.lock:
             session = self.sessions.get(key)
             if not session:
@@ -144,20 +150,29 @@ class Bridge:
             if content_digest == session.content_digest:
                 self.validate_unchanged_target(session)
             else:
-                session.expected = atomic_write(self.settings, session.plan, content, session.expected)
+                session.local.settings = self.settings
+                session.local.stage(content)
+            if not defer:
+                session.local.publish(force=True)
             session.snapshot_digest = snapshot_digest
             session.content_digest = content_digest
             if revision is not None:
                 session.last_revision = revision
-        return {"status": "saved_local", "target": str(session.plan.target), "cloud_status": "managed_by_twodrive"}
+        return self.saved_result(session)
+
+    def saved_result(self, session):
+        with session.local.lock:
+            return {"status": "saved_local", "target": str(session.plan.target),
+                    "local_path": str(session.local.blob) if session.local.blob else str(session.plan.target),
+                    "sync_error": session.local.error,
+                    "cloud_status": "pending_interval" if session.local.blob else "managed_by_twodrive"}
 
     def validate_unchanged_target(self, session: Session):
         # A no-op still has to detect disconnected mounts, symlink changes,
         # deleted originals and external edits before acknowledging the save.
-        prepare_target(self.settings, session.plan)
+        session.local.settings = self.settings
+        session.local.validate()
         check_source(session.source)
-        if fingerprint(session.plan.target) != session.expected:
-            raise SaveError("目标文件被其他程序修改，请检查后重新开启自动保存")
 
     def save_snapshot(self, key: str, payload: bytes):
         from .converter import convert_snapshot
@@ -186,15 +201,27 @@ class Bridge:
             if checksum == session.snapshot_digest:
                 self.validate_unchanged_target(session)
                 session.last_revision = revision
-                return {"status": "saved_local", "target": str(session.plan.target), "cloud_status": "managed_by_twodrive"}
-        return self.save(key, convert_snapshot(snapshot, session.plan.extension), revision=revision, snapshot_digest=checksum)
+                return self.saved_result(session)
+        return self.save(key, convert_snapshot(snapshot, session.plan.extension), revision=revision, snapshot_digest=checksum, defer=True)
+
+    def flush(self, key):
+        with self.lock:
+            session = self.sessions.get(key)
+        if not session:
+            raise SaveError("自动保存会话已结束")
+        with session.lock:
+            session.local.publish(force=True)
+            return self.saved_result(session)
 
     def close(self, key):
         with self.lock:
             session = self.sessions.get(key)
             if session:
                 with session.lock:
+                    self.local_saves.close(session.local)
                     self.sessions.pop(key, None)
+                    return self.saved_result(session)
+        return {"status": "disabled"}
 
 
 class BridgeServer(ThreadingHTTPServer):
@@ -227,6 +254,9 @@ class BridgeServer(ThreadingHTTPServer):
         finally:
             self.activity.end()
 
+    def service_actions(self):
+        self.bridge.local_saves.tick()
+
 
 def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
     class Handler(BaseHTTPRequestHandler):
@@ -250,7 +280,12 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
                 self.send_header("Access-Control-Allow-Origin", self.headers["Origin"])
                 self.send_header("Vary", "Origin")
             self.end_headers()
-            self.wfile.write(payload)
+            try:
+                self.wfile.write(payload)
+            except (BrokenPipeError, ConnectionResetError):
+                # A closing editor may leave before reading DELETE's reply.
+                # The durable close/publication already completed above.
+                pass
             self.close_connection = True
 
         def trusted_host(self):
@@ -278,6 +313,13 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
         def do_GET(self):
             if not self.authorized():
                 return self.respond(401, {"error": "unauthorized"})
+            if self.path.startswith("/sessions/"):
+                with bridge.lock:
+                    session = bridge.sessions.get(self.path.removeprefix("/sessions/"))
+                if session:
+                    with session.local.lock:
+                        return self.respond(200, bridge.saved_result(session))
+                return self.respond(404, {"error": "session_closed"})
             if self.path != "/settings":
                 return self.respond(404, {"error": "not_found"})
             return self.respond(200, {"mount_root": str(bridge.settings.mount_root),
@@ -299,7 +341,11 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
             if not self.authorized():
                 return self.respond(401, {"error": "unauthorized"})
             try:
-                if self.path.startswith("/sessions/") and self.path.endswith("/snapshot"):
+                if self.path.startswith("/sessions/") and self.path.endswith("/flush"):
+                    key = self.path.removeprefix("/sessions/").removesuffix("/flush")
+                    self.read_body(16384)
+                    result = bridge.flush(key)
+                elif self.path.startswith("/sessions/") and self.path.endswith("/snapshot"):
                     key = self.path.removeprefix("/sessions/").removesuffix("/snapshot")
                     result = bridge.save_snapshot(key, self.read_body(MAX_CONTENT))
                 elif self.path.startswith("/sessions/"):
@@ -327,10 +373,11 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
                 return self.respond(401, {"error": "unauthorized"})
             if not self.path.startswith("/sessions/"):
                 return self.respond(404, {"error": "not_found"})
-            bridge.close(self.path.removeprefix("/sessions/"))
-            self.respond(200, {"status": "disabled"})
+            result = bridge.close(self.path.removeprefix("/sessions/"))
+            self.respond(200, result)
 
     server = BridgeServer(("127.0.0.1", bridge.settings.bridge_port if port is None else port), Handler, listener=listener)
+    server.bridge = bridge
     server.daemon_threads = True
     return server
 

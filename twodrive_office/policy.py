@@ -38,6 +38,7 @@ class Settings:
     require_mount: bool = True
     bridge_port: int = 19836
     bridge_token: str = ""
+    sync_interval_seconds: float = 180.0
 
     @classmethod
     def defaults(cls):
@@ -55,6 +56,7 @@ class Settings:
             float(data.get("debounce_seconds", 1)), float(data.get("max_wait_seconds", 5)),
             bool(data.get("require_mount", True)), int(data.get("bridge_port", 19836)),
             data.get("bridge_token", ""),
+            float(data.get("sync_interval_seconds", 180)),
         )
         settings.validate()
         return settings
@@ -66,6 +68,8 @@ class Settings:
             raise SaveError("保存延迟必须满足 0.25 ≤ debounce ≤ max_wait ≤ 300 秒")
         if not 1024 <= self.bridge_port <= 65535:
             raise SaveError("本地服务端口无效")
+        if not 1 <= self.sync_interval_seconds <= 3600:
+            raise SaveError("同步间隔必须在 1–3600 秒之间")
 
     def check_mount(self):
         self.validate()
@@ -82,6 +86,7 @@ class Settings:
             "debounce_seconds": self.debounce_seconds, "max_wait_seconds": self.max_wait_seconds,
             "require_mount": self.require_mount, "bridge_port": self.bridge_port,
             "bridge_token": self.bridge_token or secrets.token_urlsafe(32),
+            "sync_interval_seconds": self.sync_interval_seconds,
         }
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".settings-")
@@ -195,10 +200,12 @@ def atomic_write(settings: Settings, plan: SavePlan, content: bytes, expected):
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
-        prepare_target(settings, plan)
-        if fingerprint(plan.target) != expected:
-            raise SaveError("保存时检测到目标冲突，原文件已保留")
-        os.replace(temporary, plan.target)
+            prepare_target(settings, plan)
+            if fingerprint(plan.target) != expected:
+                raise SaveError("保存时检测到目标冲突，原文件已保留")
+            # FUSE queues completed uploads on close. Keep the temporary
+            # handle open through rename so only the final name is queued.
+            os.replace(temporary, plan.target)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
