@@ -241,3 +241,14 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 未合并的 TwoDrive 候选将非截断可写 open 与真实写入分开：不标 Writing、不建立 upload activity、不在未写入 release 时排队；首次 write/ftruncate 才启动原有写入流程，并验证缓存/远端基线。新建/截断和真实修改继续提交。旧 0.2.21 源的新增回归实际失败于“open is not an upload”；修复候选通过。源码在独立 worktree 完成，未修改另一个开发目录的未提交文件。
 
 本机尝试专用临时 FUSE 挂载测试时 fusermount3 返回 Operation not permitted，不能列为本机实测成功。独立候选的 Linux CI 成功挂载后，真实写入完成断言超时，尚未通过完整集成门控。用户指出当前是插件项目后，已停止并关闭 TwoDrive PR #55，取消余下候选构建；没有合并、发布或安装 TwoDrive，也没有操作其运行服务。用户随后明确授权在证据确认 TwoDrive 缺陷时独立修复，已恢复 PR #55 的工作。CI 失败定位为 MockBackend 的 ETag 断言不适用；更正为检查模拟远端内容并等待完整卸载后，独立 Ubuntu 容器的真实 FUSE 挂载连续三轮通过。旧 0.2.21 源在同一实际挂载回归中失败，确认空开可引起状态/上传副作用。两库分别交付，结果待补记；插件本身仍无法拦截编辑器原生可写 open/release 的底层上传。真实 OneDrive 无写入测试。
+
+
+### 0.3.0 与配套 TwoDrive 0.2.22 交付补记
+
+[PR #5](https://github.com/LumiaBlack51/twodrive-office/pull/5) 已合入 main，源提交 `ccc46b26860123c3382feed2dc7dde681e95ec07` 的 [Office checks](https://github.com/LumiaBlack51/twodrive-office/actions/runs/41297853360) 通过。不可移动注解标签 v0.3.0 指向此合并源。[0.3.0 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.0) 已于 2026-11-01 18:32:57（Asia/Shanghai）公开；OXT 的 15 项、plugin 的 14 项内容逐字节与源码核对，四项附件的集合、状态、大小、远端 SHA-256 与注解标签解析目标在公开前后通过统一保护检查。
+
+本机现有 ONLYOFFICE 两种插件目录布局及 bridge runtime 从该 CI 包更新，实际替换 10 个程序文件；设置和连接凭据保持原字节，仅保留这些旧程序的小范围私有回退材料。认证 /settings 请求验证 socket activation 后，bridge 在无编辑器/任务时按需退出。没有创建真实文档会话、没有启动用户前台编辑器；LibreOffice 日常 profile 未变更，其新 OXT 已提供下载。再次运行最终 headless LibreOffice Writer/Calc/Impress 和真实 DOCX 原生关闭发布通过。关闭时浏览器不读取 HTTP 回复可能产生 BrokenPipe，桥接现将这种断连作为正常结束，实际保存/重试语义保持不变。
+
+合并前已检查本 PR 的 comments 和 review threads：当时只有 Copilot 配额提示，尚无 Dot 回复，不能声称 Dot 已独立批准插件。TwoDrive 的独立 [PR #55](https://github.com/LumiaBlack51/twodrive/pull/55) 最新提交则已收到 [Dot 无剩余阻断意见](https://github.com/LumiaBlack51/twodrive/pull/55#issuecomment-6556722306)，所有必需检查、真实 mock FUSE 与标准 Debian 制品门控通过后合入 main；[0.2.22-1 stable](https://github.com/LumiaBlack51/twodrive/releases/tag/v0.2.22-1) 已于 18:47:30 发布并从正式包更新本机 CLI/daemon。运行中 daemon 摘要与包一致，配置/凭据和自定义 service 保留，挂载正常，SQLite quick_check 为 ok。没有活动传输、待同步内容或打开的常规文件句柄时才执行后台升级；未重放真实 OneDrive 空开/保存，也不据模拟结果声称真实云端字节完全一致。
+
+收尾只清理本轮 Cargo target、独立工作树、CI 包/源码解包及测试容器、临时脚本和日志；保留必要配置/SQLite/队列、一套旧程序及已有独有恢复资料，不扫描删除用户缓存。已移除本轮 Cargo target、CI/源码解包、测试容器、旧码复现 worktree、本轮测试日志和字节码；被统计的已删 payload 路径分配占用为 1,982,590,976 字节，不冒称整盘净空闲变化。仅保留等待文档 PR 门控的小型源工作树，合入后移除；历史私人审计/独有恢复材料、用户缓存和必要回退状态保持不变。
