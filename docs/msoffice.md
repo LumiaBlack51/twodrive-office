@@ -89,3 +89,18 @@ Sources: [COM add-ins](https://support.microsoft.com/en-gb/excel/excel-com-add-i
 [Excel Save](https://learn.microsoft.com/en-us/office/vba/api/excel.workbook.save),
 [PowerPoint Save](https://learn.microsoft.com/en-us/office/vba/api/powerpoint.presentation.save),
 [CFAPI root information](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfgetsyncrootinfobypath).
+
+### Open-document capture boundary (2026-11-08)
+
+The hidden generated CFAPI host test now measures the synchronizer access while
+the document remains open after the actual timer save. Word, Excel and PowerPoint
+all refused a share-none read handle, while `CfOpenFileWithOplock` with read-only
+share-all flags succeeded. All native saves, OOXML checks and fixture cleanup
+passed. These are access diagnostics, not proof of a consistent read during
+concurrent edits, and do not authorize weaker capture or a cloud-sync claim.
+
+The current companion exclusive capture must wait while an editor retains its
+file handle. Local timer saving remains available; the add-in already reports
+local save separately from TwoDrive cloud completion. No registered COM/ribbon or
+real Office-to-cloud transfer was exercised, and no normal Office profile was
+modified.

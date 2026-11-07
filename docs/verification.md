@@ -1,6 +1,6 @@
 # 0.2.0 验证记录（含 0.1.0 历史） · 2026-10-14
 
-2026-11-07 Windows Microsoft Office 新候选的当前结果单独记录于 [MS Office 验证](msoffice.md#validation)。历史 Linux 插件结果不代表 Windows COM 注册、CFAPI 或真实云端已通过。
+2026-11-07 Windows Microsoft Office 新候选的当前结果单独记录于 [MS Office 验证](msoffice.md#validation)。历史 Linux 插件结果不代表 Windows COM 注册、CFAPI 或真实云端已通过。 2026-11-08 隐藏 Word/Excel/PowerPoint 的真实定时保存再验证通过；文档保持打开时排他读取被拒，读取 oplock 可取得，但不能据此声称并发快照或云同步已通过。详见 MS Office 指南的打开文件边界。
 
 开发目录：`/home/lumia/workspace/Projects/codex/office-extension`。TwoDrive 源码只读回顾自 `/home/lumia/software/twodrive` 的 `dev` 分支；未修改、重启或重新配置真实 TwoDrive。
 

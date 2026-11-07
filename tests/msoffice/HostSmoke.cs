@@ -9,6 +9,10 @@ using TwoDrive.Office;
 
 class HostSmoke
 {
+    [DllImport("cldapi.dll",CharSet=CharSet.Unicode)]
+    static extern int CfOpenFileWithOplock(string path,uint flags,out IntPtr handle);
+    [DllImport("cldapi.dll")]
+    static extern void CfCloseHandle(IntPtr handle);
     sealed class GeneratedRoot : IRootGuard
     {
         readonly string root;
@@ -117,6 +121,25 @@ class HostSmoke
                     PumpUntil(delegate { return document.Saved; },20);
                     Content(path,part,"TwoDriveTimerSaved");
                     Console.WriteLine("PASS " + host + " actual STA timer enumeration and automatic Save");
+                    if(native)
+                    {
+                        // Measure the sync adapter's actual exclusive-capture
+                        // boundary while the editor remains open after Save.
+                        try
+                        {
+                            using(var lease=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.None))
+                                Console.WriteLine("CAPTURE_LEASE " + host + " available while open");
+                        }
+                        catch(IOException) { Console.WriteLine("CAPTURE_LEASE " + host + " busy while open"); }
+                        IntPtr protectedHandle;
+                        int result=CfOpenFileWithOplock(path,0,out protectedHandle);
+                        if(result>=0)
+                        {
+                            try { Console.WriteLine("READ_OPLOCK " + host + " available while open"); }
+                            finally { CfCloseHandle(protectedHandle); }
+                        }
+                        else Console.WriteLine("READ_OPLOCK " + host + " unavailable " + result.ToString("X8"));
+                    }
                 }
                 finally
                 {
