@@ -1,5 +1,7 @@
 # TwoDrive Office AutoSave
 
+Windows Microsoft Office 的 Word/Excel/PowerPoint 原生自动保存候选正在开发，见 [MS Office 预览与验证边界](docs/msoffice.md)。它需要尚待完整接入的 TwoDrive Development CFAPI 同步根；当前不作为已完成的 OneDrive 接管或可直接安装的日常版本交付。
+
 ONLYOFFICE Desktop Editors 和 LibreOffice 的 TwoDrive 自动保存插件，当前源码为 0.3.0 开发预览版（本地保存与定时同步）。
 
 源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。安装包、校验值与验证摘要见 [v0.3.0 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.0)。
