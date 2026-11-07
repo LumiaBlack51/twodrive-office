@@ -27,7 +27,7 @@ namespace TwoDrive.Office
             public string Path;
             public Stamp Expected;
             public DateTime Due;
-            public bool Paused, Failed;
+            public bool Paused, Failed, Eligible;
         }
         readonly Dictionary<string, Session> sessions = new Dictionary<string, Session>();
         readonly IRootGuard guard;
@@ -52,7 +52,8 @@ namespace TwoDrive.Office
             try
             {
                 guard.Validate(document.FullName);
-                return document.Eligible && !IsPaused(document);
+                Session state;
+                return sessions.TryGetValue(document.Key,out state) && state.Eligible && !state.Paused;
             }
             catch (Exception) { return false; }
         }
@@ -87,7 +88,6 @@ namespace TwoDrive.Office
                 if (state.Paused) return;
                 string path = document.FullName;
                 guard.Validate(path);
-                if (!document.Eligible) { Status = "此文档暂不支持自动保存，请手动保存"; return; }
                 var stamp = Stamp.Read(path);
                 // Never silently move an existing session to a Save As target.
                 if (state.Path != null && !String.Equals(state.Path, path, StringComparison.OrdinalIgnoreCase))
@@ -101,6 +101,7 @@ namespace TwoDrive.Office
                     state.Path = path;
                     state.Expected = stamp;
                     state.Due = now + interval;
+                    state.Eligible = document.Eligible;
                 }
                 if (document.Saved)
                 {
@@ -110,6 +111,15 @@ namespace TwoDrive.Office
                     return;
                 }
                 if (!force && now < state.Due) return;
+                // Potentially expensive package validation runs on first sight
+                // and before a real save, not every timer tick/ribbon redraw.
+                state.Eligible = document.Eligible;
+                if (!state.Eligible)
+                {
+                    state.Due = now + interval;
+                    Status = "此文档暂不支持自动保存，请手动保存";
+                    return;
+                }
                 if (!state.Expected.Equals(stamp))
                     throw new IOException("磁盘文件已被其他程序修改；请检查后手动保存");
                 // Repeat immediately before the native Save; no export/format

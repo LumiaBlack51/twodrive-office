@@ -38,13 +38,21 @@ class HostSmoke
             Check(stream.ReadToEnd().Contains(expected), "persisted Office content did not match");
     }
     [STAThread]
-    static int Main()
+    static int Main(string[] args)
     {
         foreach (string name in new[] { "WINWORD", "EXCEL", "POWERPNT" })
             if (Process.GetProcessesByName(name).Length != 0)
             { Console.Error.WriteLine("Office is already running; native test refused."); return 2; }
-        string root = Path.Combine(Path.GetTempPath(), "twodrive-msoffice-host-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        bool native=args.Length==2 && args[0]=="--native-root";
+        if(args.Length!=0 && !native) return 2;
+        string root = native ? Path.GetFullPath(args[1]) : Path.Combine(Path.GetTempPath(), "twodrive-msoffice-host-" + Guid.NewGuid().ToString("N"));
+        if(native)
+        {
+            Check(Path.GetFileName(root).StartsWith("twodrive-cfapi-fixture-office-",StringComparison.Ordinal)
+                && Directory.Exists(root) && Directory.GetFileSystemEntries(root).Length==0,"not an empty generated CFAPI fixture");
+        }
+        else Directory.CreateDirectory(root);
+        IRootGuard guard=native ? (IRootGuard)new NativeRoot(new Settings {RootPath=root,RootIdentity=NativeRoot.Identity(root),IntervalSeconds=5}) : new GeneratedRoot(root);
         try
         {
             foreach (string host in new[] { "Word", "Excel", "PowerPoint" })
@@ -62,14 +70,14 @@ class HostSmoke
                         Check(app.Documents.Count == 0, "unexpected Word documents");
                         doc = app.Documents.Add(Visible: false);
                         doc.Content.Text = "original";
-                        doc.SaveAs2(path, 12);
+                        doc.SaveAs2(path, 12, AddToRecentFiles: false);
                     }
                     else if (host == "Excel")
                     {
                         Check(app.Workbooks.Count == 0, "unexpected Excel workbooks");
                         doc = app.Workbooks.Add();
                         doc.Worksheets.Item(1).Cells.Item(1, 1).Value2 = "original";
-                        doc.SaveAs(path, 51);
+                        doc.SaveAs(path, 51, AddToMru: false);
                     }
                     else
                     {
@@ -80,7 +88,7 @@ class HostSmoke
                     }
                     Console.WriteLine(host + ": generated initial document saved");
                     var document = new OfficeDocument((object)app, (object)doc, host);
-                    var controller = new SaveController(new GeneratedRoot(root), 30);
+                    var controller = new SaveController(guard, 30);
                     Console.WriteLine(host + ": checking eligibility");
                     Check(document.Eligible, host + " eligibility rejected generated document");
                     DateTime now = DateTime.UtcNow;
@@ -97,7 +105,7 @@ class HostSmoke
                     Content(path, part, "TwoDriveNativeSaved");
                     Console.WriteLine("PASS " + host + " native Save, dirty-state acknowledgement, persisted OOXML and alert restoration");
                     addIn = new AddIn();
-                    addIn.Attach((object)app,host,new SaveController(new GeneratedRoot(root),5));
+                    addIn.Attach((object)app,host,new SaveController(guard,5));
                     // Establish a clean session through the actual timer, then
                     // edit and wait for its automatic enumeration/save path.
                     var begin=DateTime.UtcNow;
@@ -131,6 +139,11 @@ class HostSmoke
             return 0;
         }
         catch (Exception e) { Console.Error.WriteLine(e.ToString()); return 1; }
-        finally { Directory.Delete(root, true); }
+        finally
+        {
+            if(!native) Directory.Delete(root,true);
+            else foreach(string name in new[]{"generated.docx","generated.xlsx","generated.pptx"})
+                File.Delete(Path.Combine(root,name));
+        }
     }
 }

@@ -55,13 +55,23 @@ do not register the add-in or change the normal Office profile.
   acknowledgement, persisted OOXML content and DisplayAlerts restoration passed
   for all three hosts. The actual STA timer loop also enumerated each generated
   document and automatically saved a second edit; its persisted OOXML was
-  checked. Owned instances exited and generated files were removed.
-- Not yet validated: registered COM loading/ribbon interaction, real CFAPI
-  root/account binding, real cloud upload, x86
+  checked. The same checks also passed with the real CFAPI root guard against an
+  explicitly created generated-data native root. The root identity includes its
+  directory file ID; junctions and unsupported reparse points are rejected without
+  following them. Owned instances exited and generated files were removed; the
+  fixture owner confirmed unregistration and removed its empty root.
+- Not yet validated: registered COM loading/ribbon interaction, a production
+  account's native root, real cloud upload, x86
   Office, other Office versions, large/complex document corpus and crash recovery.
   Host smoke attaches the real host loop with an internal generated-root guard;
   it does not install COM registration or bypass the normal connection's CFAPI
   validation. Hosted CI compiles/tests without an installed Office license.
+
+The optional `tests/msoffice/run-cfapi-smoke.ps1 -FixtureOwner ABSOLUTE_EXE`
+uses TwoDrive's `experiments/windows-cfapi/examples/office_fixture.rs` built with
+`native-sync,native-test-hooks`. It creates a new generated root, saves only its
+three generated documents, and requires the owner to confirm empty-root cleanup.
+This is not the installed client, a production account or a real cloud test.
 
 Early native checks found and corrected a dynamic COM dispatch issue caused by
 passing COM objects through dynamically bound managed constructor/cleanup calls;
