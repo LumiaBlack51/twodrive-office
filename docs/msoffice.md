@@ -53,12 +53,15 @@ do not register the add-in or change the normal Office profile.
 - `tests/msoffice/run-host-smoke.ps1`: hidden, newly created Word/Excel/PowerPoint
   instances saved generated documents via the actual Office adapter. Dirty-state
   acknowledgement, persisted OOXML content and DisplayAlerts restoration passed
-  for all three hosts. Owned instances exited and generated files were removed.
-- Not yet validated: registered COM loading/ribbon interaction and the add-in
-  timer in a real host, real CFAPI root/account binding, real cloud upload, x86
+  for all three hosts. The actual STA timer loop also enumerated each generated
+  document and automatically saved a second edit; its persisted OOXML was
+  checked. Owned instances exited and generated files were removed.
+- Not yet validated: registered COM loading/ribbon interaction, real CFAPI
+  root/account binding, real cloud upload, x86
   Office, other Office versions, large/complex document corpus and crash recovery.
-  Host smoke exercises the actual adapter/controller directly, not installed COM
-  registration. Hosted CI compiles/tests without an installed Office license.
+  Host smoke attaches the real host loop with an internal generated-root guard;
+  it does not install COM registration or bypass the normal connection's CFAPI
+  validation. Hosted CI compiles/tests without an installed Office license.
 
 Early native checks found and corrected a dynamic COM dispatch issue caused by
 passing COM objects through dynamically bound managed constructor/cleanup calls;

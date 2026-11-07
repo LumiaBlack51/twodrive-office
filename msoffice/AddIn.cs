@@ -39,14 +39,22 @@ namespace TwoDrive.Office
                     : name.IndexOf("PowerPoint", StringComparison.OrdinalIgnoreCase) >= 0 ? "PowerPoint" : null;
                 if (host == null) return;
                 var settings = Settings.Load();
-                controller = new SaveController(new NativeRoot(settings), settings.IntervalSeconds);
-                // WinForms timers run on Office's STA UI thread. Never call the
-                // Office object model from a thread pool or background worker.
-                timer = new Timer { Interval = 1000 };
-                timer.Tick += delegate { Poll(); };
-                timer.Start();
+                Attach(app, host, new SaveController(new NativeRoot(settings), settings.IntervalSeconds));
             }
             catch (Exception) { setupStatus = "未启用：请检查 TwoDrive 同步根与插件设置"; }
+        }
+        // Kept internal (not a COM entry point) so the real host loop can be
+        // tested with generated roots without changing the user's registration.
+        internal void Attach(object app, string applicationHost, SaveController saveController)
+        {
+            if (timer != null) throw new InvalidOperationException("Already attached");
+            application = app;
+            host = applicationHost;
+            controller = saveController;
+            // WinForms timers run on Office's STA UI thread, never a thread pool.
+            timer = new Timer { Interval = 1000 };
+            timer.Tick += delegate { Poll(); };
+            timer.Start();
         }
         void Poll()
         {

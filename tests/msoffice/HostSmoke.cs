@@ -20,6 +20,16 @@ class HostSmoke
         }
     }
     static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
+    static void PumpUntil(Func<bool> predicate, int seconds)
+    {
+        var deadline=DateTime.UtcNow.AddSeconds(seconds);
+        while (DateTime.UtcNow < deadline && !predicate())
+        {
+            System.Windows.Forms.Application.DoEvents();
+            System.Threading.Thread.Sleep(50);
+        }
+        Check(predicate(), "Office timer did not finish the native save");
+    }
     static void Content(string path, string part, string expected)
     {
         using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
@@ -40,6 +50,7 @@ class HostSmoke
             foreach (string host in new[] { "Word", "Excel", "PowerPoint" })
             {
                 dynamic app = null, doc = null;
+                AddIn addIn = null;
                 try
                 {
                     Console.WriteLine(host + ": create hidden instance");
@@ -85,9 +96,23 @@ class HostSmoke
                     string part = host == "Word" ? "word/document.xml" : host == "Excel" ? "xl/sharedStrings.xml" : "ppt/slides/slide1.xml";
                     Content(path, part, "TwoDriveNativeSaved");
                     Console.WriteLine("PASS " + host + " native Save, dirty-state acknowledgement, persisted OOXML and alert restoration");
+                    addIn = new AddIn();
+                    addIn.Attach((object)app,host,new SaveController(new GeneratedRoot(root),5));
+                    // Establish a clean session through the actual timer, then
+                    // edit and wait for its automatic enumeration/save path.
+                    var begin=DateTime.UtcNow;
+                    PumpUntil(delegate { return DateTime.UtcNow-begin > TimeSpan.FromSeconds(2); },5);
+                    if(host=="Word") doc.Content.Text="TwoDriveTimerSaved";
+                    else if(host=="Excel") doc.Worksheets.Item(1).Cells.Item(1,1).Value2="TwoDriveTimerSaved";
+                    else doc.Slides.Item(1).Shapes.Item(1).TextFrame.TextRange.Text="TwoDriveTimerSaved";
+                    Check(!document.Saved,"timer edit not dirty");
+                    PumpUntil(delegate { return document.Saved; },20);
+                    Content(path,part,"TwoDriveTimerSaved");
+                    Console.WriteLine("PASS " + host + " actual STA timer enumeration and automatic Save");
                 }
                 finally
                 {
+                    if(addIn!=null) { Array custom=new object[0]; addIn.OnDisconnection(0,ref custom); }
                     if (doc != null)
                     {
                         try { if (host == "Word") doc.Close(0); else doc.Close(); }

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 [assembly: System.Reflection.AssemblyVersion("0.4.0.0")]
 [assembly: System.Reflection.AssemblyFileVersion("0.4.0.0")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("TwoDrive.Office.HostSmoke")]
 
 namespace TwoDrive.Office
 {
