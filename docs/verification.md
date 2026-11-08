@@ -283,6 +283,6 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 
 不可移动注解标签 v0.3.1 指向上述合并源。[0.3.1 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.1) 于 2026-11-08 18:22:00（Asia/Shanghai）公开；五项附件（OXT、plugin、Wine x64 ZIP、verification.json、SHA256SUMS）的集合、uploaded 状态、大小和远端 SHA-256 在公开前后均通过核验，注解标签对象及解析提交一致。Copilot 仅返回配额不足提示，未获得独立代码审阅，不把该提示或 CI 成功称为审阅批准。
 
-公开后从同一 CI 包安装到本机停止的 Microsoft365 bottle，并更新独立 Linux runtime 和已有 ONLYOFFICE 两种插件目录，实际更新 10 个既有程序文件。Wine DLL 摘要为 `d55f1c6fc5f73a79a7b02265aa998e143dfe3ce9e2635e61e718ef5bdc337e8b`；其八项 COM 注册之外的 system.reg 内容、完整 user.reg、连接凭据和 systemd unit 均保持原字节。仅保留一套少量旧程序回退材料。安装没有启动日常编辑器、创建真实文档会话或对真实挂载保存；日常 LibreOffice profile 未修改。认证 /settings 验证 socket 唤醒更新后的 bridge，空闲后 MainPID=0、服务 inactive/dead，只有现有用户管理器的 socket 继续监听。
+公开后从同一 CI 包安装到本机停止的 Microsoft365 bottle，并更新独立 Linux runtime 和已有 ONLYOFFICE 两种插件目录，runtime/ONLYOFFICE 共替换或新增 10 个程序文件，另写入 Wine 加载项及其连接配置。Wine DLL 摘要为 `d55f1c6fc5f73a79a7b02265aa998e143dfe3ce9e2635e61e718ef5bdc337e8b`；其八项 COM 注册之外的 system.reg 内容、完整 user.reg、连接凭据和 systemd unit 均保持原字节。仅保留一套少量旧程序回退材料。安装没有启动日常编辑器、创建真实文档会话或对真实挂载保存；日常 LibreOffice profile 未修改。认证 /settings 验证 socket 唤醒更新后的 bridge，空闲后 MainPID=0、服务 inactive/dead，只有现有用户管理器的 socket 继续监听。
 
-清理移除本轮临时 MinGW/clang 工具、9.8 GiB 测试 prefix、0.3.0 对照源码、探针/临时脚本/日志、Actions 原始解包及重复程序文件。已删除 payload 路径的分配占用合计 11,020,439,552 字节；这不是整盘净空闲增加的声明。保留正式发布包、必要审计摘要、一套小范围程序回退和所有真实 pending/用户数据；没有扫描删除用户缓存或恢复材料，也没有修改 TwoDrive 本体/服务。本补记是文档收尾，不改变 v0.3.1 的不可移动发布源。
+清理移除本轮临时 MinGW/clang 工具、9.8 GiB 测试 prefix、0.3.0 对照源码、探针/临时脚本/日志、Actions 原始解包及重复程序文件。被统计的已删除 payload 路径分配占用合计 11,020,439,552 字节；这不是整盘净空闲增加的声明。保留正式发布包、必要审计摘要、一套小范围程序回退和所有真实 pending/用户数据；没有扫描删除用户缓存或恢复材料，也没有修改 TwoDrive 本体/服务。本补记是文档收尾，不改变 v0.3.1 的不可移动发布源。
