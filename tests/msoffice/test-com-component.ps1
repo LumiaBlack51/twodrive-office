@@ -32,9 +32,15 @@ try {
     & $helper -AssemblyPath $dll -Scope LocalMachine
     $registered=$true
     # The protected path contains spaces. URI escaping must match CLR/RegAsm.
-    $object=New-Object -ComObject TwoDrive.Office.AutoSave
-    if(!$object.Status($null)){throw 'Managed callback interface could not be invoked'}
-    if([Runtime.InteropServices.Marshal]::IsComObject($object)){[void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($object)}
+    $activation='try {$object=New-Object -ComObject TwoDrive.Office.AutoSave; if(!$object.Status($null)){throw "Callback interface missing"}; exit 0} catch {Write-Error $_; exit 1}'
+    $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($activation))
+    $start=New-Object Diagnostics.ProcessStartInfo
+    $start.FileName="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $start.Arguments='-NoProfile -NonInteractive -Sta -WindowStyle Hidden -EncodedCommand '+$encoded
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+    $child=[Diagnostics.Process]::Start($start)
+    $stdout=$child.StandardOutput.ReadToEnd();$stderr=$child.StandardError.ReadToEnd();$child.WaitForExit()
+    if($child.ExitCode -ne 0){throw ('Fresh-process COM activation failed: '+$stderr)}
     $refused=$false;try{& $helper -AssemblyPath $other -Scope LocalMachine -Unregister}catch{$refused=$_.Exception.Message -like '*different component*'}
     if(!$refused -or !(Test-Path -LiteralPath $classKey)){throw 'Foreign uninstall was not rejected'}
     & $helper -AssemblyPath $dll -Scope LocalMachine

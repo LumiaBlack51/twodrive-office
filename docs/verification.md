@@ -327,3 +327,6 @@ CLR/RegAsm 的 Assembly.CodeBase 格式后，新进程实际激活成功，程�
 
 参考：[HKCR 与关闭 UAC 时的 COM 配置](https://learn.microsoft.com/en-us/windows/win32/sysinfo/hkey-classes-root-key)。
 
+CI 补验：受保护组件的实际 COM 激活、空格路径、ACL 和他人卸载拒绝均通过；
+首轮在同一 CLR 中加载后立即删 DLL，因 Windows 映像锁而清理失败。激活改在
+独立隐藏子进程完成，退出后清理；不把夹具清理失败归为插件连接失败。
