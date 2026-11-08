@@ -276,3 +276,13 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 ### ONLYOFFICE 关闭回归补充
 
 本轮 0.3.1 初期连续三次在“关闭后 6 秒内发布”处失败，诊断为仍有一个普通（非 Wine native_publish）会话、无活动请求和无提交错误，待同步内容仍完整保留；对照 0.3.0 源的一次运行通过，因此不能声称旧版必现或是 Wine 提交方式导致。卸载时的跨源 DELETE/Authorization 请求需要预检，存在退出阶段送达不稳定的边界；现优先使用正文携带凭据的简单 text/plain beacon，限定于 /close 的小请求，继续校验 Host、Origin、令牌，且不在 URL 或日志写凭据；拒绝入队时保留原 keepalive 后备。新增认证/恶意 Origin/Host/错误凭据及队列保全回归通过。修改后的真实 ONLYOFFICE 10.0.0 PNG DOCX 原位完整回归（含关闭前待同步内容立即提交）通过。强制杀进程不保证网页退出通知送达，仍依靠持久队列及按需服务退出/恢复保护。
+
+### 0.3.1 发布、安装与清理补记
+
+[PR #8](https://github.com/LumiaBlack51/twodrive-office/pull/8) 已合入 main；合并源 `e70568897c975d8cf8a17b433f3816d607e47356` 的 [CI](https://github.com/LumiaBlack51/twodrive-office/actions/runs/42470739575) 通过。Actions 原始制品 SHA-256 `0a4206f11250942ecd7218fa8de231a98eba8523ebbfc091a8ba7825a292596a` 与服务端声明一致；OXT、plugin 和 Wine ZIP 的源码文件逐字节核对。**此次 CI 包中的原样 Wine DLL** 又完成 Word/Excel/PowerPoint 全套真实应用验证，原始三份 Wine 注册表摘要保持不变、私有进程组和 prefix 已移除。修正后的 ONLYOFFICE PNG DOCX 关闭/待同步发布连续两次完整通过。
+
+不可移动注解标签 v0.3.1 指向上述合并源。[0.3.1 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.1) 于 2026-11-08 18:22:00（Asia/Shanghai）公开；五项附件（OXT、plugin、Wine x64 ZIP、verification.json、SHA256SUMS）的集合、uploaded 状态、大小和远端 SHA-256 在公开前后均通过核验，注解标签对象及解析提交一致。Copilot 仅返回配额不足提示，未获得独立代码审阅，不把该提示或 CI 成功称为审阅批准。
+
+公开后从同一 CI 包安装到本机停止的 Microsoft365 bottle，并更新独立 Linux runtime 和已有 ONLYOFFICE 两种插件目录，实际更新 10 个既有程序文件。Wine DLL 摘要为 `d55f1c6fc5f73a79a7b02265aa998e143dfe3ce9e2635e61e718ef5bdc337e8b`；其八项 COM 注册之外的 system.reg 内容、完整 user.reg、连接凭据和 systemd unit 均保持原字节。仅保留一套少量旧程序回退材料。安装没有启动日常编辑器、创建真实文档会话或对真实挂载保存；日常 LibreOffice profile 未修改。认证 /settings 验证 socket 唤醒更新后的 bridge，空闲后 MainPID=0、服务 inactive/dead，只有现有用户管理器的 socket 继续监听。
+
+清理移除本轮临时 MinGW/clang 工具、9.8 GiB 测试 prefix、0.3.0 对照源码、探针/临时脚本/日志、Actions 原始解包及重复程序文件。已删除 payload 路径的分配占用合计 11,020,439,552 字节；这不是整盘净空闲增加的声明。保留正式发布包、必要审计摘要、一套小范围程序回退和所有真实 pending/用户数据；没有扫描删除用户缓存或恢复材料，也没有修改 TwoDrive 本体/服务。本补记是文档收尾，不改变 v0.3.1 的不可移动发布源。
