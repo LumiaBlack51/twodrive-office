@@ -18,7 +18,8 @@ $cls='{72D11CA7-C180-463F-BC48-822DC433A169}'
 $resolved=(Resolve-Path -LiteralPath $AssemblyPath).ProviderPath
 $name=[Reflection.AssemblyName]::GetAssemblyName($resolved)
 if($name.Name -ne 'TwoDrive.Office'){throw 'Unexpected component assembly'}
-$uri=[Reflection.Assembly]::ReflectionOnlyLoadFrom($resolved).CodeBase
+# Uri.ToString matches CLR CodeBase: spaces unescaped, reserved characters safe.
+$uri=([Uri]$resolved).ToString()
 $machine=$Scope -eq 'LocalMachine'
 if($machine){
     if(![Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Machine COM registration requires an administrator'}
