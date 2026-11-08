@@ -30,9 +30,9 @@ def main():
                 print(json.dumps({"target": data["target"], "local_path": str(manifest.parent / data["blob"])}, ensure_ascii=False))
             return
         if args.command == "recover":
-            from .lifecycle import OfficePresence
+            from .lifecycle import OfficePresence, ALL_EDITORS
             from .local_save import LocalSaveQueue
-            if OfficePresence(names=("DesktopEditors", "desktopeditors", "soffice.bin")).running():
+            if OfficePresence(names=ALL_EDITORS).running():
                 raise SaveError("请先正常关闭办公软件，再恢复本地待同步版本")
             queue = LocalSaveQueue(settings)
             try:
@@ -56,7 +56,7 @@ def main():
             print("设置已保存：", args.config)
         elif args.command == "serve":
             from .bridge import Bridge, make_server
-            from .lifecycle import OfficePresence, activation_socket
+            from .lifecycle import OfficePresence, activation_socket, ALL_EDITORS
             if args.idle_timeout < 0:
                 raise SaveError("退出延迟不能为负数")
             bridge = Bridge(settings)
@@ -65,7 +65,7 @@ def main():
             try:
                 if args.idle_timeout:
                     office = OfficePresence()
-                    all_office = OfficePresence(names=("DesktopEditors", "desktopeditors", "soffice.bin"))
+                    all_office = OfficePresence(names=ALL_EDITORS)
                     server.timeout = 1
                     while True:
                         server.handle_request()

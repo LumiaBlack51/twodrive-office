@@ -301,6 +301,13 @@
         disposed = true;
         clearInterval(polling); clearInterval(ticking);
         if (engine) engine.stop();
-        if (session) request("/sessions/" + session.session_id, {method: "DELETE", keepalive: true}).catch(() => {});
+        if (session) {
+            try {
+                if (window.navigator && typeof window.navigator.sendBeacon === "function" &&
+                    window.navigator.sendBeacon(validateBridge(bridge.url) + "/close",
+                        JSON.stringify({token: bridge.token, session_id: session.session_id}))) return;
+            } catch (_) { /* Fall back to the authenticated keepalive request. */ }
+            request("/sessions/" + session.session_id, {method: "DELETE", keepalive: true}).catch(() => {});
+        }
     });
 })();

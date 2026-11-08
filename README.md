@@ -1,8 +1,8 @@
 # TwoDrive Office AutoSave
 
-ONLYOFFICE Desktop Editors 和 LibreOffice 的 TwoDrive 自动保存插件，当前源码为 0.3.0 开发预览版（本地保存与定时同步）。
+ONLYOFFICE Desktop Editors、LibreOffice 和 Wine/Soda Microsoft Office 的 TwoDrive 自动保存插件，当前源码为 0.3.1 开发预览版（本地保存与定时同步）。
 
-源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。安装包、校验值与验证摘要见 [v0.3.0 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.0)。
+源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。安装包、校验值与验证摘要见 [v0.3.1 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.1)。
 
 打开位于 TwoDrive 挂载目录内的文档后，会自动开启本地保存。修改先持久保存到挂载外的私有目录，默认每 180 秒将最新版本提交到 TwoDrive，关闭文档或点“立即保存”时立即提交。目录外或未命名文档默认关闭，用户手动开启后保存当前编辑内容的副本。默认副本目录是 `~/TwoDrive/OneDrive/Office AutoSave`，用户可以在开启/保存时选择 TwoDrive 内的其他目录。
 
@@ -23,7 +23,9 @@ python3 scripts/install.py --onlyoffice --bridge
 
 安装脚本不会启动编辑器、打开文档或改变当前会话的开关。升级后请在自己方便时重新启动办公软件，让新版本的后台启动配置生效。ONLYOFFICE 安装脚本会自动检测本机的 Flatpak 安装；也可以显式传入 `--oo-flatpak`。
 
-可安装包位于 `dist/twodrive-autosave-0.3.0.oxt` 和 `dist/twodrive-autosave-0.3.0.plugin`。通过 ONLYOFFICE 插件管理器安装通用包时，还需要本地 bridge；项目安装脚本会自动写入连接配置。
+可安装包位于 `dist/twodrive-autosave-0.3.1.oxt` 和 `dist/twodrive-autosave-0.3.1.plugin`。通过 ONLYOFFICE 插件管理器安装通用包时，还需要本地 bridge；项目安装脚本会自动写入连接配置。
+
+Wine/Soda 下的 Microsoft 365 x64：解压 `twodrive-autosave-0.3.1-wine-x64.zip`，正常退出 bottle 后运行 `python3 scripts/install_wine.py --prefix /绝对/bottle/路径 --bridge`。使用 Linux 保存服务加原生 COM 加载项，支持 Word、Excel、PowerPoint；操作和兼容边界见 [Wine 安装与说明](docs/wine.md)。原位模式的星号由 Office 原生保存清除，本地暂存成功仍保留星号，默认 180 秒、关闭或“立即保存”时提交。
 
 自定义默认副本目录：
 
@@ -74,7 +76,7 @@ python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --rich
 
 LibreOffice 测试使用系统 Python 的 UNO 模块和独立后台 profile。ONLYOFFICE 测试使用经过认证的独立 Xvfb 显示；禁止连接开发者正在工作的显示。相关结果与实际发现见 [验证记录](docs/verification.md)。
 
-代码结构：`twodrive_office/` 是保存策略、调度、本地 bridge 和转换器；`libreoffice/` 是 UNO 扩展；`onlyoffice/` 是面板及桌面适配器；`scripts/` 负责构建和安装。
+代码结构：`twodrive_office/` 是保存策略、调度、本地 bridge 和转换器；`libreoffice/` 是 UNO 扩展；`onlyoffice/` 是面板及桌面适配器；`wine/` 是 Microsoft Office 的原生 x64 COM 入口；`scripts/` 负责构建和安装。
 
 ## 许可
 
