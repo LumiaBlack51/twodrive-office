@@ -87,6 +87,7 @@ struct Http {
 };
 struct Record {
   D identity;
+  std::wstring autoName;
   std::string session, source;
   bool paused = false, inPlace = false, nativeObserved = false;
   unsigned long long revision = 0;
@@ -344,9 +345,11 @@ class AddIn : public Ext, public Ribbon {
     if (rec.paused && !manual)
       return;
     if (rec.session.empty()) {
-      if (!manual && rec.lastAutoCheck &&
+      auto name = doc.str(L"FullName");
+      if (!manual && name == rec.autoName && rec.lastAutoCheck &&
           GetTickCount64() - rec.lastAutoCheck < 10000)
         return;
+      rec.autoName = name;
       rec.lastAutoCheck = GetTickCount64();
       rec.source = source(doc);
       if (!manual && !within(rec.source))
