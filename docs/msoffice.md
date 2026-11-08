@@ -104,3 +104,26 @@ file handle. Local timer saving remains available; the add-in already reports
 local save separately from TwoDrive cloud completion. No registered COM/ribbon or
 real Office-to-cloud transfer was exercised, and no normal Office profile was
 modified.
+
+### Generated Office-to-cloud pipeline (2026-11-08)
+
+`tests/msoffice/run-cloud-smoke.ps1` coordinates hidden owned Office instances
+with the companion `native_office_cloud_fixture` executable. Initial native-save
+baselines are copied before edits; the actual STA timer persists the final OOXML.
+After the three editors close, those generated final documents are captured under
+the real CFAPI root and conditionally uploaded over their initial personal-OneDrive
+versions. Full cloud bytes and native in-sync acknowledgement passed for all three
+hosts. The generated remote folder/files, documents, baselines and native root were
+completely retired. The current personal account was verified independently.
+
+This verifies the actual component path after documents unlock. It does not
+establish registered COM/ribbon loading, continuous uploads while an editor holds
+its file, or whole-root takeover. The host preserves an unexpected visible/existing
+Office instance and only quits an owned instance once its generated document is
+closed and no other documents remain.
+
+The installer now rejects known generated root identities before modifying the
+normal profile; production registration must carry the account-bound digest form.
+The host-test guard still accepts its explicit generated roots. This corrects the
+earlier description that implied every generated native-prefix fixture would be
+rejected by the old prefix-only installer. No normal registration was performed.

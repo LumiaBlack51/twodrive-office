@@ -47,15 +47,18 @@ class HostSmoke
         foreach (string name in new[] { "WINWORD", "EXCEL", "POWERPNT" })
             if (Process.GetProcessesByName(name).Length != 0)
             { Console.Error.WriteLine("Office is already running; native test refused."); return 2; }
-        bool native=args.Length==2 && args[0]=="--native-root";
-        if(args.Length!=0 && !native) return 2;
+        bool native=(args.Length==2 || args.Length==3) && args[0]=="--native-root";
+        bool checkpoint=native && args.Length==3 && args[2]=="--cloud-checkpoint";
+        if((args.Length!=0 && !native) || (args.Length==3 && !checkpoint)) return 2;
         string root = native ? Path.GetFullPath(args[1]) : Path.Combine(Path.GetTempPath(), "twodrive-msoffice-host-" + Guid.NewGuid().ToString("N"));
+        string baseline=checkpoint ? Path.Combine(Path.GetTempPath(),"twodrive-msoffice-baseline-"+Guid.NewGuid().ToString("N")) : null;
         if(native)
         {
             Check(Path.GetFileName(root).StartsWith("twodrive-cfapi-fixture-office-",StringComparison.Ordinal)
                 && Directory.Exists(root) && Directory.GetFileSystemEntries(root).Length==0,"not an empty generated CFAPI fixture");
         }
         else Directory.CreateDirectory(root);
+        if(checkpoint) Directory.CreateDirectory(baseline);
         IRootGuard guard=native ? (IRootGuard)new NativeRoot(new Settings {RootPath=root,RootIdentity=NativeRoot.Identity(root),IntervalSeconds=5}) : new GeneratedRoot(root);
         try
         {
@@ -63,15 +66,19 @@ class HostSmoke
             {
                 dynamic app = null, doc = null;
                 AddIn addIn = null;
+                bool ownedApp = false;
                 try
                 {
+                    string processName=host=="Word" ? "WINWORD" : host=="Excel" ? "EXCEL" : "POWERPNT";
+                    Check(Process.GetProcessesByName(processName).Length==0,"Office started before this generated host could acquire an instance");
                     Console.WriteLine(host + ": create hidden instance");
                     app = Activator.CreateInstance(Type.GetTypeFromProgID(host + ".Application", true));
-                    if (host != "PowerPoint") app.Visible = false;
+                    if(host!="PowerPoint") Check(!(bool)app.Visible,"unexpected visible Office instance");
                     string path = Path.Combine(root, "generated." + (host == "Word" ? "docx" : host == "Excel" ? "xlsx" : "pptx"));
                     if (host == "Word")
                     {
                         Check(app.Documents.Count == 0, "unexpected Word documents");
+                        ownedApp = true;
                         doc = app.Documents.Add(Visible: false);
                         doc.Content.Text = "original";
                         doc.SaveAs2(path, 12, AddToRecentFiles: false);
@@ -79,6 +86,7 @@ class HostSmoke
                     else if (host == "Excel")
                     {
                         Check(app.Workbooks.Count == 0, "unexpected Excel workbooks");
+                        ownedApp = true;
                         doc = app.Workbooks.Add();
                         doc.Worksheets.Item(1).Cells.Item(1, 1).Value2 = "original";
                         doc.SaveAs(path, 51, AddToMru: false);
@@ -86,11 +94,20 @@ class HostSmoke
                     else
                     {
                         Check(app.Presentations.Count == 0, "unexpected PowerPoint presentations");
+                        ownedApp = true;
                         doc = app.Presentations.Add(0);
                         doc.Slides.Add(1, 12);
                         doc.SaveAs(path, 24);
                     }
                     Console.WriteLine(host + ": generated initial document saved");
+                    if(checkpoint)
+                    {
+                        // This generated baseline is copied while the STA is
+                        // paused immediately after native Save, before any edit.
+                        using(var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete))
+                        using(var output=new FileStream(Path.Combine(baseline,Path.GetFileName(path)),FileMode.CreateNew,FileAccess.Write,FileShare.None))
+                        { input.CopyTo(output); output.Flush(true); }
+                    }
                     var document = new OfficeDocument((object)app, (object)doc, host);
                     var controller = new SaveController(guard, 30);
                     Console.WriteLine(host + ": checking eligibility");
@@ -152,12 +169,24 @@ class HostSmoke
                     }
                     if (app != null)
                     {
-                        try { if (host == "Word") app.Quit(0); else app.Quit(); }
+                        try
+                        {
+                            int remaining=host=="Word" ? (int)app.Documents.Count : host=="Excel" ? (int)app.Workbooks.Count : (int)app.Presentations.Count;
+                            if(ownedApp && remaining==0) { if (host == "Word") app.Quit(0); else app.Quit(); }
+                        }
                         catch (Exception) { }
                         Marshal.FinalReleaseComObject((object)app);
                     }
                     GC.Collect(); GC.WaitForPendingFinalizers();
                 }
+            }
+            if(checkpoint)
+            {
+                // All owned editors/documents are closed. The parent verifies
+                // conditional cloud transfer before allowing fixture retirement.
+                Console.WriteLine("ready-cloud:"+baseline);
+                Console.Out.Flush();
+                Check(Console.ReadLine()=="finish","cloud checkpoint not acknowledged");
             }
             return 0;
         }
@@ -167,6 +196,7 @@ class HostSmoke
             if(!native) Directory.Delete(root,true);
             else foreach(string name in new[]{"generated.docx","generated.xlsx","generated.pptx"})
                 File.Delete(Path.Combine(root,name));
+            if(baseline!=null) Directory.Delete(baseline,true);
         }
     }
 }

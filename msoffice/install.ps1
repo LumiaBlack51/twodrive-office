@@ -37,6 +37,11 @@ try {
     Add-Type -Path $candidate
     $resolvedRoot = (Resolve-Path -LiteralPath $Root).Path.TrimEnd('\')
     $identity = [TwoDrive.Office.NativeRoot]::Identity($resolvedRoot)
+    $separator = $identity.IndexOf(':')
+    $registration = [Text.UTF8Encoding]::new($false,$true).GetString([Convert]::FromBase64String($identity.Substring($separator+1)))
+    if ($registration -cnotmatch '^twodrive-dev-native-v1:[a-f0-9]{64}$') {
+        throw 'Installation requires an account-bound production root; generated fixture roots are not installation targets.'
+    }
     # Validate before any normal Office profile/registration is changed.
     New-Item -ItemType Directory -Path $install -Force | Out-Null
     Copy-Item -LiteralPath $candidate -Destination $assemblyPath -Force
