@@ -252,3 +252,27 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 合并前已检查本 PR 的 comments 和 review threads：当时只有 Copilot 配额提示，尚无 Dot 回复，不能声称 Dot 已独立批准插件。TwoDrive 的独立 [PR #55](https://github.com/LumiaBlack51/twodrive/pull/55) 最新提交则已收到 [Dot 无剩余阻断意见](https://github.com/LumiaBlack51/twodrive/pull/55#issuecomment-6556722306)，所有必需检查、真实 mock FUSE 与标准 Debian 制品门控通过后合入 main；[0.2.22-1 stable](https://github.com/LumiaBlack51/twodrive/releases/tag/v0.2.22-1) 已于 18:47:30 发布并从正式包更新本机 CLI/daemon。运行中 daemon 摘要与包一致，配置/凭据和自定义 service 保留，挂载正常，SQLite quick_check 为 ok。没有活动传输、待同步内容或打开的常规文件句柄时才执行后台升级；未重放真实 OneDrive 空开/保存，也不据模拟结果声称真实云端字节完全一致。
 
 收尾只清理本轮 Cargo target、独立工作树、CI 包/源码解包及测试容器、临时脚本和日志；保留必要配置/SQLite/队列、一套旧程序及已有独有恢复资料，不扫描删除用户缓存。已移除本轮 Cargo target、CI/源码解包、测试容器、旧码复现 worktree、本轮测试日志和字节码；被统计的已删 payload 路径分配占用为 1,982,590,976 字节，不冒称整盘净空闲变化。仅保留等待文档 PR 门控的小型源工作树，合入后移除；历史私人审计/独有恢复材料、用户缓存和必要回退状态保持不变。
+
+## 0.3.1：Wine/Soda Microsoft Office · 2026-11-08
+
+新增 Wine 原生 x64 COM 入口，Linux bridge 继续负责路径核验、私有完整文档快照、队列和恢复；没有合入 PR #7 的 Windows CFAPI 候选或改动 TwoDrive。实际源安装是 Bottles Microsoft365-Trio，Soda `11.0-37-office-v7`，Microsoft 365 x64 `16.0.20326.20232`（Word 二进制 FileVersion），三种应用对象模型均为 16.0。
+
+- Python 54 项、Node 22 项通过。新增回归覆盖 Flat OPC 命名空间/图片字节、非法包/宏/签名、Linux 盘符解析/大小写/重映射、仅本地暂存、原生提交许可与旧确认拒绝、断挂载/符号链接/外部冲突、关闭失败后的恢复门控、显式原生 Save、离线安装/卸载和忙碌 prefix 拒绝。
+- 真实 Word / Excel / PowerPoint 的 COM 注册加载和自动连接通过；完整修改内容先成为挂载外的 DOCX/XLSX/PPTX，挂载原文件保持不变，本地保存未假清原生 Saved 标记。真实 Save now、Ctrl+S 后继续编辑、8 秒实际 STA 定时提交、空闲字节稳定、暂停/重新开启、最终关闭文本及原生保存标记验证通过。未实等每个样本 180 秒；默认 180 秒策略另由可控时钟的现有队列回归覆盖。按钮通过已注册 COM 对象的同名回调调用，不能称实际鼠标点击 ribbon 已验证。
+- 测试使用停止源 prefix 的完整独立副本、临时模拟挂载和设置、带随机认证的独立 Xvfb（无 TCP listener，无 Wayland/会话 DBus）。编辑前核实实际 Office 进程的 DISPLAY、WINEPREFIX、XDG；原始三份 Wine 注册表摘要保持不变。只终止验证为该测试 prefix 所属的专用进程组；临时 prefix、生成文档和测试显示全部移除。
+- LibreOffice 26.2.5.2 headless 独立 profile 回归通过：注册加载、Writer 原位和暂停、手动保存、目录外/未命名副本、外部冲突、Calc XLSX / Impress PPTX 内容与源保护。
+
+### 实际发现和修正
+
+1. Wine 的 HKCR 未识别本次 HKCU Classes，Office 也未枚举 HKCU Addins。安装器离线修改**指定 bottle 内**的 HKLM Classes/Addins（system.reg），不运行 Wine、不改宏信任或其他 bottle；真实枚举、连接与组件加载通过。权限和凭据写在私有插件目录。
+2. `wine_get_unix_file_name` 在独立探针成功、在 Office/AppV 进程内失败；改由 Linux 按该 prefix 的实际 dosdevices 解析，并在导出/提交时重新解析。没有固定假设 Z: 总是根目录。
+3. 普通文档的 Permission/MSIPC getter 在此 Wine 安装不可用。已知 IRM 状态会拒绝，仍核验普通无宏/无签名 OOXML 与密码/文档保护；动态 IRM、复杂保护状态不在支持/验证声明内。不能把 getter 异常当成“已验证无权限限制”。
+4. Excel 在 BeforeClose 内不可靠地产生 SaveCopyAs，且 Save 后仍显示未保存。改为取消这次关闭、PostMessage 到同一 Office STA，完成当前内容暂存及原生保存后再关闭；失败保留文档打开，避免最后编辑丢失。Word 的自动化 Close 会报告这次取消；测试继续核验延后的真实关闭及最终包文本，不将初次取消 HRESULT 误称保存失败。
+5. 此 Wine PowerPoint 的 dispatch identity 会变化。保留文档 COM 引用，并以该引用的实时路径/名称对齐包装器；另存为仍关联原会话并由源变化保护停止，不生成重复目标会话。无窗口的 PowerPoint 无 ActivePresentation 时，只在恰有一个文档时选择该对象；不在多个文档间猜测。
+6. 有窗口的私有 X11 PowerPoint 样本曾在 SaveAs 阶段发生 RPC 断开；未确认根因，不能把这次运行列为成功。最终 PowerPoint 检查使用无窗口的真实应用，仍通过注册加载、当前内容、原生保存、定时器和关闭。用户日常 Wayland ribbon 交互未在这轮自动化中实测。
+
+原位模式不由 bridge 在打开期间原子替换文件：每次先核验 mount/目标指纹，再由 Office 原生 Save 更新自己的文件状态；确认携带一次性许可并绑定快照版本。源改名、挂载失效或外部修改保留本地版本；强制退出后的未采样内容仍依赖 Office 自身恢复。普通本地保存与 OneDrive 上传完成分开陈述；这轮没有真实云端保存测试。
+
+### ONLYOFFICE 关闭回归补充
+
+本轮 0.3.1 初期连续三次在“关闭后 6 秒内发布”处失败，诊断为仍有一个普通（非 Wine native_publish）会话、无活动请求和无提交错误，待同步内容仍完整保留；对照 0.3.0 源的一次运行通过，因此不能声称旧版必现或是 Wine 提交方式导致。卸载时的跨源 DELETE/Authorization 请求需要预检，存在退出阶段送达不稳定的边界；现优先使用正文携带凭据的简单 text/plain beacon，限定于 /close 的小请求，继续校验 Host、Origin、令牌，且不在 URL 或日志写凭据；拒绝入队时保留原 keepalive 后备。新增认证/恶意 Origin/Host/错误凭据及队列保全回归通过。修改后的真实 ONLYOFFICE 10.0.0 PNG DOCX 原位完整回归（含关闭前待同步内容立即提交）通过。强制杀进程不保证网页退出通知送达，仍依靠持久队列及按需服务退出/恢复保护。

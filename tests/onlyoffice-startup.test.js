@@ -5,7 +5,7 @@ const {join} = require("node:path");
 const vm = require("node:vm");
 const {AutoSave} = require("../onlyoffice/autosave.js");
 
-async function startup({source = "/mount/deck.pptx", inPlace = true, failure = null} = {}) {
+async function startup({source = "/mount/deck.pptx", inPlace = true, failure = null, beacon = null} = {}) {
     const controls = new Map(), calls = [], events = {}, timers = [];
     let engine;
     function control(id) {
@@ -22,7 +22,8 @@ async function startup({source = "/mount/deck.pptx", inPlace = true, failure = n
         parent: {AscDesktopEditor: {LocalFileGetSaved: () => !!source, LocalFileGetSourcePath: () => source},
             Asc: {editor: {isDocumentModified: () => false}}},
         TwoDriveAutoSave: {AutoSave: class extends AutoSave { constructor(...args) { super(...args); engine = this; } }},
-        addEventListener() {}};
+        navigator: beacon ? {sendBeacon: beacon} : undefined,
+        addEventListener(name, callback) { events[name] = callback; }};
     vm.runInNewContext(readFileSync(join(__dirname, "../onlyoffice/plugin.js"), "utf8"), {
         window, document: {getElementById: control}, crypto: {randomUUID: () => "document-id"},
         URL, AbortSignal, Event, setInterval(callback) { timers.push(callback); return timers.length; }, clearInterval() {},
@@ -79,4 +80,17 @@ test("manual pause survives later content-ready events and timer polling", async
     for (const timer of state.timers) await timer();
     assert.equal(state.engine.enabled, false);
     assert.equal(state.calls.filter(call => call.path === "/sessions").length, 1);
+});
+
+
+test("unload posts an authenticated simple beacon and falls back if the queue refuses it", async () => {
+    const beacons = [];
+    const state = await startup({beacon: (url, body) => { beacons.push({url, data: JSON.parse(body)}); return true; }});
+    state.events.beforeunload();
+    assert.deepEqual(beacons, [{url: "http://127.0.0.1:19836/close", data: {token: "test-token", session_id: "session-id"}}]);
+    assert.equal(state.calls.some(call => call.method === "DELETE"), false);
+    const refused = await startup({beacon: () => false});
+    refused.events.beforeunload();
+    await new Promise(setImmediate);
+    assert.deepEqual(refused.calls.at(-1), {path: "/sessions/session-id", method: "DELETE"});
 });

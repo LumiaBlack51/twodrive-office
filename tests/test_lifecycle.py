@@ -81,3 +81,18 @@ class LifecycleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WinePresenceTests(unittest.TestCase):
+    def test_wine_office_hosts_keep_bridge_alive_until_their_process_exits(self):
+        from twodrive_office.lifecycle import OfficePresence
+        import tempfile
+        for name in ('WINWORD.EXE', 'EXCEL.EXE', 'POWERPNT.EXE'):
+            with self.subTest(host=name), tempfile.TemporaryDirectory() as temporary:
+                proc = Path(temporary); process = proc / '123'; process.mkdir()
+                (process / 'comm').write_text(name + '\n')
+                now = [0]
+                presence = OfficePresence(proc=proc, clock=lambda: now[0])
+                self.assertTrue(presence.running())
+                (process / 'comm').unlink(); process.rmdir(); now[0] = 6
+                self.assertFalse(presence.running())
