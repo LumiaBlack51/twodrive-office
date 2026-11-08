@@ -263,3 +263,33 @@ Word/Excel/PowerPoint 的实际 STA 定时保存结果，经自有 CFAPI 根完�
 COM/功能区、未使用用户文档，也不将此结果算作常驻协调器或原目录接管。全部生成范围
 已退役，详见 MS Office 指南的流水线验证。另修正测试实例所有权退出保护、安装器拒绝
 生成根的检查与描述；11 项保存控制器检查和测试宿主编译通过。
+
+
+## 2026-11-09 当前用户真实 COM 部署与接管验收
+
+TwoDrive Development 的 Windows CFAPI 根已接管原个人目录，学校同步保留。
+插件安装到当前用户的 30 秒配置，根的注册身份已校验。首次 HKCU COM 激活和
+Word 连接均报告 0x80070002；完整 RegAsm 用户注册与版本键仍失败。该机
+EnableLUA=0 且当前进程为管理员，符合微软所述忽略每用户 COM 注册的环境。
+因此增加显式 `-MachineCom`：组件进入受保护 Program Files，只有组件 CLSID/
+ProgID 使用 HKLM，Office 启用和根配置仍为当前用户。安装器拒绝低权限可写
+组件/父路径、链接和他人注册；保留现有系统安全配置。
+
+受保护组件首次仍在无预加载进程失败。CodeBase 从 escaped AbsoluteUri 改为
+CLR/RegAsm 的 Assembly.CodeBase 格式后，新进程实际激活成功，程序集位置
+确认在 Program Files。回归使用带空格的受保护路径，验证实际 COM 激活、
+不安全 ACL 拒绝、不同组件卸载拒绝及重注册，CI 仅在一次性 hosted VM 执行。
+
+重装另暴露 Windows PowerShell 将 File.Replace 第三参数 $null 绑定为空字符串，
+导致已有设置替换报路径错误；改为 NullString.Value 后，实际重装成功到达 COM
+注册。ACL 校验改用 SID 规则，避免机器现有无法映射的主体名称导致检查失败。
+
+实际 Word/Excel/PowerPoint 当前用户注册加载均连接成功，验证根身份，未打开/
+保存任何用户文档，也未启动可见编辑器。验证脚本仅取得无文档隐藏实例，显式
+断开测试连接后关闭并恢复 LoadBehavior=3；异常实例只按本次 PID/创建时间/
+无窗口证据清理。早期脚本缺少外层错误捕获和退出等待，已补明确阶段与所有权。
+此前生成文档的真实 STA 定时保存和条件云端闭环仍是单独证据，不把本次 COM
+加载检查冒称新做了用户文档保存。已知边界：严格原生捕获在编辑器持续占用时
+推迟云端提交；本地定时保存已验证，完整后台捕获以文档关闭为前提。
+
+参考：[HKCR 与关闭 UAC 时的 COM 配置](https://learn.microsoft.com/en-us/windows/win32/sysinfo/hkey-classes-root-key)。

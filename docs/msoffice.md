@@ -127,3 +127,15 @@ normal profile; production registration must carry the account-bound digest form
 The host-test guard still accepts its explicit generated roots. This corrects the
 earlier description that implied every generated native-prefix fixture would be
 rejected by the old prefix-only installer. No normal registration was performed.
+
+
+### 管理员且关闭 UAC 的设备
+
+普通安装使用当前用户组件注册。若设备配置使 Windows 忽略用户 COM 注册，
+安装器会在修改前提示使用 `install.ps1 -Root <同步根> -MachineCom`。该方式需
+管理员权限，仅共享代码组件进入受保护 Program Files 并注册 COM 类；Word/
+Excel/PowerPoint 启用项及 30 秒根设置仍限当前用户。不改变 UAC 等系统配置。
+`-Uninstall` 移除当前用户 Office 启用，保留组件/设置；显式 `-MachineCom
+-Uninstall` 才移除共享组件注册。程序文件与用户文档保留。
+
+2026-11-09 已在接管后的个人目录完成三宿主实际 COM 连接验证；详见验证记录。

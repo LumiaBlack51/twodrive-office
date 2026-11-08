@@ -11,6 +11,7 @@ $assembly = Join-Path $out 'TwoDrive.Office.dll'
 & $compiler /nologo /target:library /platform:anycpu /optimize+ /warnaserror+ "/out:$assembly" /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:System.IO.Compression.dll /reference:Microsoft.CSharp.dll @sources
 if ($LASTEXITCODE -ne 0) { throw 'MS Office add-in compilation failed' }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'install.ps1') -Destination $out -Force
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'register-component.ps1') -Destination $out -Force
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination $out -Force
 if ($Test) {
     $testExe = Join-Path $out 'TwoDrive.Office.Tests.exe'
