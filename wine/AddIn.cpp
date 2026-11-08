@@ -745,6 +745,7 @@ public:
       KillTimer(window, 1);
       DestroyWindow(window);
       window = nullptr;
+      UnregisterClassW(L"TwoDriveOfficeWineTimer", moduleHandle);
     }
     if (point) {
       if (cookie)

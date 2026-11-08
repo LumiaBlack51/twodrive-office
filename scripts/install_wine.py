@@ -24,7 +24,8 @@ def prefix_running(prefix):
             if process.stat().st_uid != os.getuid():
                 continue
             env = dict(item.split(b'=', 1) for item in (process / 'environ').read_bytes().split(b'\0') if b'=' in item)
-            if env.get(b'WINEPREFIX', b'').decode() == prefix:
+            value = env.get(b'WINEPREFIX', b'').decode()
+            if value and str(Path(value).resolve()) == prefix:
                 return True
         except (OSError, UnicodeError):
             pass
@@ -94,6 +95,8 @@ def install(prefix, dll, settings, *, uninstall=False):
     # Refuse a path which follows an inherited link outside the chosen prefix.
     if not destination.resolve().is_relative_to(prefix):
         raise SaveError('插件目录指向所选 Wine prefix 外部')
+    if any((destination / name).is_symlink() for name in ('TwoDrive.Wine.dll', 'TwoDrive.Wine.dll.previous', 'bridge.ini', 'LICENSE')):
+        raise SaveError('插件文件是符号链接，安装已停止')
     windows_directory = 'C:\\' + str(destination.relative_to(prefix / 'drive_c')).replace('/', '\\')
     sections = registry_sections(windows_directory)
     original = registry.read_bytes()

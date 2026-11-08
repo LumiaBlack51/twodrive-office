@@ -60,6 +60,14 @@ class WineRegistryTests(unittest.TestCase):
             settings = Settings(root / 'mount', root / 'mount/copies', bridge_token='x' * 48)
             with patch('subprocess.run', side_effect=AssertionError('No programs may be launched')):
                 destination = wine_installer.install(root, dll, settings)
+                # A subsequent upgrade must not follow an owned-file symlink.
+                external = root / 'outside'; external.write_bytes(b'preserve')
+                installed_dll = destination / 'TwoDrive.Wine.dll'
+                installed_bytes = installed_dll.read_bytes(); installed_dll.unlink(); installed_dll.symlink_to(external)
+                from twodrive_office.policy import SaveError
+                with self.assertRaises(SaveError): wine_installer.install(root, dll, settings)
+                self.assertEqual(external.read_bytes(), b'preserve')
+                installed_dll.unlink(); installed_dll.write_bytes(installed_bytes)
                 self.assertEqual((root / 'user.reg').read_bytes(), original)
                 self.assertEqual((destination / 'bridge.ini').stat().st_mode & 0o777, 0o600)
                 self.assertIn(str(root), (destination / 'bridge.ini').read_text(encoding='utf-16'))
