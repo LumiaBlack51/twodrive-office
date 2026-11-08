@@ -577,7 +577,11 @@ try:
                     if any(b'Pending revision on native close' in archive.read(n) for n in archive.namelist() if n.endswith('.xml')):
                         break
             else:
-                raise AssertionError('Native close did not publish the latest staged revision')
+                raise AssertionError('Native close did not publish the latest staged revision: ' + json.dumps({
+                    'sessions': len(bridge.bridge.sessions),
+                    'native_publish': [s.native_publish for s in bridge.bridge.sessions.values()],
+                    'pending_errors': [r.error for r in bridge.bridge.local_saves.records],
+                    'active_requests': bridge.activity.connections}))
             assert not bridge.bridge.local_saves.pending()
             print('PASS native close publishes the pending local revision before the periodic deadline', flush=True)
         else:

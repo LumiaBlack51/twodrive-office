@@ -354,6 +354,32 @@ class BridgeTests(unittest.TestCase):
             request("/sessions/" + session["session_id"], b"bad export")
         self.assertEqual(Path(session["target"]).read_bytes(), docx("http"))
 
+    def test_simple_close_beacon_requires_token_origin_host_and_publishes_pending(self):
+        bridge = Bridge(self.settings)
+        opened = bridge.create({"document_id": "beacon", "extension": "docx"})
+        key = opened["session_id"]
+        bridge.save(key, docx("close beacon"), revision=1, defer=True)
+        server = make_server(bridge, port=0)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
+        url = f"http://127.0.0.1:{server.server_port}/close"
+        def beacon(token, headers=None):
+            return urllib.request.urlopen(urllib.request.Request(url,
+                json.dumps({"token": token, "session_id": key}).encode(),
+                {"Content-Type": "text/plain;charset=UTF-8", "Origin": "null", **(headers or {})}), timeout=5)
+        for token, headers in (("wrong", {}), ("非凭据", {}),
+                               (self.settings.bridge_token, {"Origin": "https://untrusted.example"}),
+                               (self.settings.bridge_token, {"Host": "evil.example"})):
+            with self.assertRaises(urllib.error.HTTPError) as caught: beacon(token, headers)
+            self.assertEqual(caught.exception.code, 401)
+            self.assertIn(key, bridge.sessions)
+            self.assertFalse(Path(opened["target"]).exists())
+        with beacon(self.settings.bridge_token) as response:
+            self.assertEqual(response.status, 200)
+        self.assertNotIn(key, bridge.sessions)
+        self.assertEqual(Path(opened["target"]).read_bytes(), docx("close beacon"))
+        self.assertFalse(bridge.local_saves.pending())
+
 
 if __name__ == "__main__":
     unittest.main()

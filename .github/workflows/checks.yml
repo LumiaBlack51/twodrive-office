@@ -18,8 +18,14 @@ jobs:
           node-version: '22'
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
       - run: node --test tests/onlyoffice*.test.js
+      - run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64
+      - run: python3 scripts/build_wine.py
       - run: python3 scripts/build.py
       - uses: actions/upload-artifact@v4
         with:
           name: twodrive-office-packages
-          path: dist/*
+          path: |
+            dist/*.oxt
+            dist/*.plugin
+            dist/*-wine-x64.zip
+            dist/SHA256SUMS

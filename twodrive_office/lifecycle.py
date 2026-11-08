@@ -9,6 +9,9 @@ from pathlib import Path
 
 from .policy import SaveError
 
+BRIDGE_EDITORS = ("DesktopEditors", "desktopeditors", "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE")
+ALL_EDITORS = (*BRIDGE_EDITORS, "soffice.bin")
+
 
 class Activity:
     def __init__(self, clock=time.monotonic):
@@ -36,7 +39,7 @@ class Activity:
 
 class OfficePresence:
     """Check only while the bridge runs; no separate process or login poller."""
-    def __init__(self, proc=Path("/proc"), clock=time.monotonic, names=("DesktopEditors", "desktopeditors")):
+    def __init__(self, proc=Path("/proc"), clock=time.monotonic, names=BRIDGE_EDITORS):
         self.proc, self.clock = proc, clock
         self.names = names
         self.checked_at = float("-inf")

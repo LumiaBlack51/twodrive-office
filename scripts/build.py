@@ -47,10 +47,21 @@ def build():
         for path in sorted((ROOT / "onlyoffice").rglob("*")):
             if path.is_file():
                 archive.write(path, str(path.relative_to(ROOT / "onlyoffice")))
+    packages = [lo, oo]
+    dll = dist / "wine/TwoDrive.Wine.dll"
+    if dll.exists():
+        wine = dist / f"twodrive-autosave-{__version__}-wine-x64.zip"
+        with zipfile.ZipFile(wine, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(dll, "wine/TwoDrive.Wine.dll")
+            for name in ("LICENSE", "README.md", "docs/wine.md", "docs/verification.md", "docs/releases/v0.3.1.md", "scripts/install_wine.py", "scripts/bridge_install.py"):
+                archive.write(ROOT / name, name)
+            for path in sorted((ROOT / "twodrive_office").glob("*.py")):
+                archive.write(path, str(path.relative_to(ROOT)))
+        packages.append(wine)
     (dist / "SHA256SUMS").write_text("".join(
         hashlib.sha256(path.read_bytes()).hexdigest() + "  " + path.name + "\n"
-        for path in (lo, oo)), encoding="utf-8")
-    for path in (lo, oo):
+        for path in packages), encoding="utf-8")
+    for path in packages:
         print(path)
     return lo, oo
 

@@ -62,6 +62,7 @@ class LocalRevision:
         self.failures = 0
         self.writer = None
         self.recovered = False
+        self.auto_publish = True
 
     def validate(self):
         prepare_target(self.settings, self.plan)
@@ -88,6 +89,8 @@ class LocalRevision:
     def publish(self, force=False):
         with self.lock:
             if not self.blob:
+                return
+            if not force and not self.auto_publish:
                 return
             now = self.clock()
             if not force and now < max(self.due_at, self.retry_at):

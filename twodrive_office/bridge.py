@@ -97,6 +97,9 @@ class Session:
     touched: float = field(default_factory=time.monotonic)
     lock: threading.Lock = field(default_factory=threading.Lock)
     local: object = None
+    native_publish: bool = False
+    native_token: str = ""
+    native_revision: int = 0
 
 
 class Bridge:
@@ -106,7 +109,7 @@ class Bridge:
             raise SaveError("请先执行 configure，生成本地服务凭据")
         self.settings = settings
         self.sessions: dict[str, Session] = {}
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.local_saves = LocalSaveQueue(settings, state_root, clock)
 
     def create(self, data):
@@ -124,7 +127,10 @@ class Bridge:
             key = secrets.token_urlsafe(24)
             expected = fingerprint(plan.target)
             local = self.local_saves.open(plan, expected)
-            self.sessions[key] = Session(plan, expected, normalized(data["source_path"]) if data.get("source_path") else None, local=local)
+            native_publish = data.get("native_publish") is True and plan.in_place
+            local.auto_publish = not native_publish
+            self.sessions[key] = Session(plan, expected, normalized(data["source_path"]) if data.get("source_path") else None,
+                                         local=local, native_publish=native_publish)
         return {"session_id": key, "target": str(plan.target), "in_place": plan.in_place,
                 "extension": plan.extension, "sync_interval_seconds": self.settings.sync_interval_seconds}
 
@@ -132,8 +138,7 @@ class Bridge:
         now = time.monotonic()
         for key, session in list(self.sessions.items()):
             if now - session.touched > 3600 and not session.lock.locked():
-                self.local_saves.close(session.local)
-                del self.sessions[key]
+                self.close(key)
 
     def save(self, key: str, content: bytes, revision: int | None = None, *, snapshot_digest: str | None = None, defer=False):
         with self.lock:
@@ -209,6 +214,8 @@ class Bridge:
             session = self.sessions.get(key)
         if not session:
             raise SaveError("自动保存会话已结束")
+        if session.native_publish:
+            raise SaveError("请在 Office 中使用立即保存，以保留原生文档状态")
         with session.lock:
             session.local.publish(force=True)
             return self.saved_result(session)
@@ -218,7 +225,14 @@ class Bridge:
             session = self.sessions.get(key)
             if session:
                 with session.lock:
-                    self.local_saves.close(session.local)
+                    if session.native_publish and session.local.blob:
+                        # Native Save failed/Office disappeared. Preserve the
+                        # revision until no editor can hold an older model.
+                        session.local.closed = session.local.recovered = True
+                        session.local.due_at = float("inf")
+                        session.local.auto_publish = True
+                    else:
+                        self.local_saves.close(session.local)
                     self.sessions.pop(key, None)
                     return self.saved_result(session)
         return {"status": "disabled"}
@@ -317,13 +331,15 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
                 with bridge.lock:
                     session = bridge.sessions.get(self.path.removeprefix("/sessions/"))
                 if session:
+                    session.touched = time.monotonic()
                     with session.local.lock:
                         return self.respond(200, bridge.saved_result(session))
                 return self.respond(404, {"error": "session_closed"})
             if self.path != "/settings":
                 return self.respond(404, {"error": "not_found"})
             return self.respond(200, {"mount_root": str(bridge.settings.mount_root),
-                                      "copy_directory": str(bridge.settings.copy_directory)})
+                                      "copy_directory": str(bridge.settings.copy_directory),
+                                      "sync_interval_seconds": bridge.settings.sync_interval_seconds})
 
         def read_body(self, limit):
             if self.headers.get("Transfer-Encoding"):
@@ -338,10 +354,41 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
             return data
 
         def do_POST(self):
+            if self.path == "/close":
+                # A simple text beacon survives renderer teardown without a
+                # new DELETE/Authorization CORS preflight. Never put tokens in
+                # URLs, and authenticate this narrowly scoped operation itself.
+                if not self.valid_origin() or not self.trusted_host():
+                    return self.respond(401, {"error": "unauthorized"})
+                try:
+                    data = json.loads(self.read_body(16384))
+                    if (not isinstance(data, dict) or not isinstance(data.get("token"), str)
+                            or not secrets.compare_digest(data["token"].encode(), bridge.settings.bridge_token.encode())
+                            or not isinstance(data.get("session_id"), str)):
+                        return self.respond(401, {"error": "unauthorized"})
+                    self.server.activity.touch()
+                    return self.respond(200, bridge.close(data["session_id"]))
+                except (SaveError, ValueError, OSError):
+                    return self.respond(409, {"error": "close_request_rejected"})
             if not self.authorized():
                 return self.respond(401, {"error": "unauthorized"})
             try:
-                if self.path.startswith("/sessions/") and self.path.endswith("/flush"):
+                if self.path.startswith("/sessions/") and self.path.endswith("/office"):
+                    from .wine import save_office
+                    key = self.path.removeprefix("/sessions/").removesuffix("/office")
+                    source = bytes.fromhex(self.headers.get("X-TwoDrive-Source", "")).decode("utf-8")
+                    result = save_office(bridge, key, self.read_body(MAX_CONTENT),
+                                         int(self.headers.get("X-TwoDrive-Revision", "0")), source,
+                                         self.headers.get("X-TwoDrive-Encoding"))
+                elif self.path.startswith("/sessions/") and self.path.endswith(("/native-prepare", "/native-explicit")):
+                    from .wine import prepare_native
+                    self.read_body(16384)
+                    result = prepare_native(bridge, self.path.split("/")[2], explicit=self.path.endswith("/native-explicit"))
+                elif self.path.startswith("/sessions/") and self.path.endswith("/native-complete"):
+                    from .wine import complete_native
+                    result = complete_native(bridge, self.path.removeprefix("/sessions/").removesuffix("/native-complete"),
+                                             self.read_body(MAX_CONTENT), self.headers.get("X-TwoDrive-Native-Token", ""))
+                elif self.path.startswith("/sessions/") and self.path.endswith("/flush"):
                     key = self.path.removeprefix("/sessions/").removesuffix("/flush")
                     self.read_body(16384)
                     result = bridge.flush(key)
@@ -356,6 +403,9 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
                         raise SaveError("请求格式无效")
                     if self.path == "/sessions":
                         result = bridge.create(data)
+                    elif self.path == "/wine-path":
+                        from .wine import resolve_wine_path
+                        result = {"path": resolve_wine_path(data.get("prefix", ""), data.get("source", ""))}
                     elif self.path == "/pick-directory":
                         result = {"path": pick_path(bridge.settings.copy_directory, True)}
                     elif self.path == "/pick-source":
