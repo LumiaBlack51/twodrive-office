@@ -1,0 +1,27 @@
+name: Microsoft Office add-in
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  windows:
+    name: MS Office Windows build and save regressions
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test without launching Office
+        shell: powershell
+        run: ./msoffice/build.ps1 -Test
+      - name: Activate protected managed COM component without Office
+        shell: powershell
+        run: ./tests/msoffice/test-com-component.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: twodrive-msoffice-preview
+          path: |
+            dist/msoffice/TwoDrive.Office.dll
+            dist/msoffice/install.ps1
+            dist/msoffice/register-component.ps1
+            dist/msoffice/LICENSE

@@ -1,5 +1,7 @@
 # 0.2.0 验证记录（含 0.1.0 历史） · 2026-10-14
 
+2026-11-07 Windows Microsoft Office 新候选的当前结果单独记录于 [MS Office 验证](msoffice.md#validation)。历史 Linux 插件结果不代表 Windows COM 注册、CFAPI 或真实云端已通过。 2026-11-08 隐藏 Word/Excel/PowerPoint 的真实定时保存再验证通过；文档保持打开时排他读取被拒，读取 oplock 可取得，但不能据此声称并发快照或云同步已通过。详见 MS Office 指南的打开文件边界。
+
 开发目录：`/home/lumia/workspace/Projects/codex/office-extension`。TwoDrive 源码只读回顾自 `/home/lumia/software/twodrive` 的 `dev` 分支；未修改、重启或重新配置真实 TwoDrive。
 
 ## 实际环境与测试
@@ -286,3 +288,45 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 公开后从同一 CI 包安装到本机停止的 Microsoft365 bottle，并更新独立 Linux runtime 和已有 ONLYOFFICE 两种插件目录，runtime/ONLYOFFICE 共替换或新增 10 个程序文件，另写入 Wine 加载项及其连接配置。Wine DLL 摘要为 `d55f1c6fc5f73a79a7b02265aa998e143dfe3ce9e2635e61e718ef5bdc337e8b`；其八项 COM 注册之外的 system.reg 内容、完整 user.reg、连接凭据和 systemd unit 均保持原字节。仅保留一套少量旧程序回退材料。安装没有启动日常编辑器、创建真实文档会话或对真实挂载保存；日常 LibreOffice profile 未修改。认证 /settings 验证 socket 唤醒更新后的 bridge，空闲后 MainPID=0、服务 inactive/dead，只有现有用户管理器的 socket 继续监听。
 
 清理移除本轮临时 MinGW/clang 工具、9.8 GiB 测试 prefix、0.3.0 对照源码、探针/临时脚本/日志、Actions 原始解包及重复程序文件。被统计的已删除 payload 路径分配占用合计 11,020,439,552 字节；这不是整盘净空闲增加的声明。保留正式发布包、必要审计摘要、一套小范围程序回退和所有真实 pending/用户数据；没有扫描删除用户缓存或恢复材料，也没有修改 TwoDrive 本体/服务。本补记是文档收尾，不改变 v0.3.1 的不可移动发布源。
+
+## 2026-11-08 Microsoft Office 生成文档到真实云端
+
+Word/Excel/PowerPoint 的实际 STA 定时保存结果，经自有 CFAPI 根完整快照、个人 OneDrive
+条件版本上传、完整云端回读及原生同步确认通过。捕获前关闭了测试自己的编辑器；未安装
+COM/功能区、未使用用户文档，也不将此结果算作常驻协调器或原目录接管。全部生成范围
+已退役，详见 MS Office 指南的流水线验证。另修正测试实例所有权退出保护、安装器拒绝
+生成根的检查与描述；11 项保存控制器检查和测试宿主编译通过。
+
+
+## 2026-11-09 当前用户真实 COM 部署与接管验收
+
+TwoDrive Development 的 Windows CFAPI 根已接管原个人目录，学校同步保留。
+插件安装到当前用户的 30 秒配置，根的注册身份已校验。首次 HKCU COM 激活和
+Word 连接均报告 0x80070002；完整 RegAsm 用户注册与版本键仍失败。该机
+EnableLUA=0 且当前进程为管理员，符合微软所述忽略每用户 COM 注册的环境。
+因此增加显式 `-MachineCom`：组件进入受保护 Program Files，只有组件 CLSID/
+ProgID 使用 HKLM，Office 启用和根配置仍为当前用户。安装器拒绝低权限可写
+组件/父路径、链接和他人注册；保留现有系统安全配置。
+
+受保护组件首次仍在无预加载进程失败。CodeBase 从 escaped AbsoluteUri 改为
+CLR/RegAsm 的 Assembly.CodeBase 格式后，新进程实际激活成功，程序集位置
+确认在 Program Files。回归使用带空格的受保护路径，验证实际 COM 激活、
+不安全 ACL 拒绝、不同组件卸载拒绝及重注册，CI 仅在一次性 hosted VM 执行。
+
+重装另暴露 Windows PowerShell 将 File.Replace 第三参数 $null 绑定为空字符串，
+导致已有设置替换报路径错误；改为 NullString.Value 后，实际重装成功到达 COM
+注册。ACL 校验改用 SID 规则，避免机器现有无法映射的主体名称导致检查失败。
+
+实际 Word/Excel/PowerPoint 当前用户注册加载均连接成功，验证根身份，未打开/
+保存任何用户文档，也未启动可见编辑器。验证脚本仅取得无文档隐藏实例，显式
+断开测试连接后关闭并恢复 LoadBehavior=3；异常实例只按本次 PID/创建时间/
+无窗口证据清理。早期脚本缺少外层错误捕获和退出等待，已补明确阶段与所有权。
+此前生成文档的真实 STA 定时保存和条件云端闭环仍是单独证据，不把本次 COM
+加载检查冒称新做了用户文档保存。已知边界：严格原生捕获在编辑器持续占用时
+推迟云端提交；本地定时保存已验证，完整后台捕获以文档关闭为前提。
+
+参考：[HKCR 与关闭 UAC 时的 COM 配置](https://learn.microsoft.com/en-us/windows/win32/sysinfo/hkey-classes-root-key)。
+
+CI 补验：受保护组件的实际 COM 激活、空格路径、ACL 和他人卸载拒绝均通过；
+首轮在同一 CLR 中加载后立即删 DLL，因 Windows 映像锁而清理失败。激活改在
+独立隐藏子进程完成，退出后清理；不把夹具清理失败归为插件连接失败。
