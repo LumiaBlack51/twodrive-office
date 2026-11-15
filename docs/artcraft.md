@@ -1,4 +1,4 @@
-# Artcraft TwoDrive AutoSave companion 0.1.0
+# Artcraft TwoDrive AutoSave companion 0.1.1
 
 适用于 Linux 的 WordCraft 0.18.1、GridCraft 0.19.1、DeckCraft 0.18.1。三款应用没有可加载的通用 Office add-in API，本扩展使用独立启动入口、私有工作副本和原生控制接口，不修改应用二进制或日常 Office profile。其他版本需要重新验证。
 
@@ -42,7 +42,7 @@ twodrive-artcraft sessions
 twodrive-artcraft recover SESSION_ID
 ```
 
-`sessions` 显示目标、工作文件、待同步状态及错误。恢复前请正常关闭所有 Artcraft 编辑器；恢复会校验目标未被外部修改，把保留的完整本地文件提交到挂载。发生冲突时保留双方版本，需人工处理。请保留 `~/.local/state/twodrive-office/artcraft/` 中未完成会话和现有 `pending/`；这些属于恢复数据。干净退出、成功提交后的会话目录及复制的配置、日志会删除。意外退出的私有 profile 可能含额外 AutoRecover 数据，恢复成功前一并保留。
+`sessions` 显示目标、工作文件、待同步状态及错误。恢复前请正常关闭所有 Artcraft 编辑器；恢复会校验目标未被外部修改，把保留的完整本地文件提交到挂载。有保留会话的目标会拒绝重新打开，包括断挂载后尚未进入 `pending/` 的本地保存。已有待同步修订时，只有它的内容和原始目标 fingerprint 都与所选会话一致才直接发布；存在不同版本时拒绝自动替换，保留两份数据供人工比较选择。请保留 `~/.local/state/twodrive-office/artcraft/` 中未完成会话和现有 `pending/`；这些属于恢复数据。干净退出、成功提交后的会话目录及复制的配置、日志会删除。意外退出的私有 profile 可能含额外 AutoRecover 数据，恢复成功前一并保留。
 
 ## 隔离与兼容边界
 

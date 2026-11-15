@@ -29,6 +29,22 @@ def sessions_directory():
     return state_directory().parent / "artcraft"
 
 
+def source_snapshot(path):
+    """Bind the bytes to the file identity observed before, during and after reading."""
+    def identity(stat):
+        return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    expected = fingerprint(path)
+    with path.open("rb") as stream:
+        opened = identity(os.fstat(stream.fileno()))
+        content = stream.read(MAX_CONTENT + 1)
+        finished = identity(os.fstat(stream.fileno()))
+    if expected is None or not (expected == opened == finished == fingerprint(path)):
+        raise SaveError("复制文档时源文件发生变化，请重新打开；没有覆盖任何版本")
+    if len(content) > MAX_CONTENT:
+        raise SaveError("源文件超过 128 MiB")
+    return content, expected
+
+
 def private_environment(directory: Path, editor: str):
     env = dict(os.environ)
     # Use absolute Wayland socket paths before changing XDG_RUNTIME_DIR.
@@ -95,26 +111,37 @@ class WorkingSession:
         check_source(self.source)
         if not self.source.is_file() or self.source.stat().st_size > MAX_CONTENT:
             raise SaveError("源文件不存在或超过 128 MiB")
-        content = self.source.read_bytes()
+        content, source_expected = source_snapshot(self.source)
         validate_document(content, extension)
         if not within(self.source, normalized(settings.mount_root)) and copy_directory is None:
             raise SaveError("目录外文档需要显式指定 --copy-directory；原文件保持不变")
         self.plan = plan_save(settings, self.source, self.source.name, "", extension, copy_directory)
         self.queue = LocalSaveQueue(settings, queue_root, clock)
+        session_root = root or sessions_directory()
         try:
-            self.record = self.queue.open(self.plan, fingerprint(self.plan.target))
+            expected = source_expected if self.plan.in_place else fingerprint(self.plan.target)
+            self.record = self.queue.open(self.plan, expected)
+            # The queue lock serializes this check with other companion opens of this target.
+            # A retained native save may not have reached pending/ while the mount was offline.
+            for metadata in session_root.glob("*/session.json"):
+                previous = json.loads(metadata.read_text())
+                if previous.get("target") == str(self.plan.target):
+                    raise SaveError("此目标有保留的 Artcraft 会话，请先处理本地工作副本后再打开")
+            self.record.validate()  # Never adopt a newer fingerprint after copying older bytes.
+            self.directory = session_root / secrets.token_hex(16)
+            self.directory.mkdir(parents=True, mode=0o700)
+            self.working = self.directory / self.source.name
+            durable_replace(self.working, content)
+            self.seen = hashlib.sha256(content).hexdigest()
+            self.error = ""
+            self.deck_save = True
+            self.last_deck_save = clock()
+            self.status("准备就绪")
         except Exception:
             self.queue.shutdown()
+            if hasattr(self, "directory"):
+                shutil.rmtree(self.directory, ignore_errors=True)
             raise
-        self.directory = (root or sessions_directory()) / secrets.token_hex(16)
-        self.directory.mkdir(parents=True, mode=0o700)
-        self.working = self.directory / self.source.name
-        durable_replace(self.working, content)
-        self.seen = hashlib.sha256(content).hexdigest()
-        self.error = ""
-        self.deck_save = True
-        self.last_deck_save = clock()
-        self.status("准备就绪")
 
     def status(self, message):
         durable_replace(self.directory / "session.json", json.dumps({
@@ -231,7 +258,11 @@ def recover_session(directory, settings):
         record = next((r for r in queue.records if r.plan == plan), None)
         if record is None:
             record = queue.open(plan, expected)
-        record.stage(content)
+            record.stage(content)
+        elif record.expected != expected or record.blob.read_bytes() != content:
+            # Even the same target/baseline does not establish chronological ownership.
+            # Never stage an older retained session over a distinct pending revision.
+            raise SaveError("待同步修订与所选会话不同；两份版本均已保留，请先人工确认恢复版本")
         record.publish(force=True)
     finally:
         queue.shutdown()

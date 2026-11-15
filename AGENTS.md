@@ -1,5 +1,7 @@
 # TwoDrive Office development
 
+- Before publishing or finishing PR work, read Dot's latest PR review comments and address confirmed findings with appropriate verification. Recheck after follow-up commits; passing CI alone does not replace checking Dot's feedback.
+
 - Do not launch an office editor onto the user's display or change their normal office profile during development.
 - LibreOffice integration tests must use `--headless`, a unique `UserInstallation`, and temporary settings/documents.
 - ONLYOFFICE Flatpak resets `DISPLAY` and XDG variables supplied via `flatpak run --env`. Set them **inside** a sandbox shell. Disable X11/Wayland sockets and use an authenticated TCP Xvfb display; verify the real process environment, private profile, and private native instance port before interacting.
