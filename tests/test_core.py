@@ -19,8 +19,9 @@ from twodrive_office.bridge import Bridge, make_server, validate_document, docum
 def docx(text="test"):
     content = io.BytesIO()
     with zipfile.ZipFile(content, "w") as archive:
-        archive.writestr("[Content_Types].xml", "<Types/>")
-        archive.writestr("word/document.xml", "<document>" + text + "</document>")
+        # Fixed ZIP timestamps keep byte comparisons stable across wall-clock seconds.
+        archive.writestr(zipfile.ZipInfo("[Content_Types].xml"), "<Types/>")
+        archive.writestr(zipfile.ZipInfo("word/document.xml"), "<document>" + text + "</document>")
     return content.getvalue()
 
 
