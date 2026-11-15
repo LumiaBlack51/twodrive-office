@@ -286,3 +286,23 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 公开后从同一 CI 包安装到本机停止的 Microsoft365 bottle，并更新独立 Linux runtime 和已有 ONLYOFFICE 两种插件目录，runtime/ONLYOFFICE 共替换或新增 10 个程序文件，另写入 Wine 加载项及其连接配置。Wine DLL 摘要为 `d55f1c6fc5f73a79a7b02265aa998e143dfe3ce9e2635e61e718ef5bdc337e8b`；其八项 COM 注册之外的 system.reg 内容、完整 user.reg、连接凭据和 systemd unit 均保持原字节。仅保留一套少量旧程序回退材料。安装没有启动日常编辑器、创建真实文档会话或对真实挂载保存；日常 LibreOffice profile 未修改。认证 /settings 验证 socket 唤醒更新后的 bridge，空闲后 MainPID=0、服务 inactive/dead，只有现有用户管理器的 socket 继续监听。
 
 清理移除本轮临时 MinGW/clang 工具、9.8 GiB 测试 prefix、0.3.0 对照源码、探针/临时脚本/日志、Actions 原始解包及重复程序文件。被统计的已删除 payload 路径分配占用合计 11,020,439,552 字节；这不是整盘净空闲增加的声明。保留正式发布包、必要审计摘要、一套小范围程序回退和所有真实 pending/用户数据；没有扫描删除用户缓存或恢复材料，也没有修改 TwoDrive 本体/服务。本补记是文档收尾，不改变 v0.3.1 的不可移动发布源。
+
+## Artcraft companion 0.1.0 · 2026-11-15
+
+Linux 独立入口适配 WordCraft **0.18.1**、GridCraft **0.19.1**、DeckCraft **0.18.1**；不是加载到应用内的 Office 插件。WordCraft 按 v0.18.1 的原生控制协议和 `file.autosave` 实现；GridCraft 参考原生 AutoSave（源码审阅 8bde636f272cb5ac1d9b945cecf17791febe605d）；DeckCraft 参考原生 Save/AutoRecover（a4674dbd1c03ee981b0ebc415a4b3a829479c318）。真正执行的是以上本机发行二进制；不将主分支源码审阅当作其他发行版实测。
+
+实现复用现有 LocalSaveQueue、挂载/目标校验及原子发布。编辑器只自动保存私有工作副本；源文档在模拟挂载，默认延迟发布。WordCraft 先本地 Save 再开启原生 AutoSave；GridCraft 独立配置开启原生开关；DeckCraft 无原生文档 AutoSave，伴随进程每约 3 秒在单一受跟踪文档、明确本地路径、无对话框时调用原生 Save。原生保存标记只代表本地文件已保存。三者与伴随进程共用专用网络命名空间；Word key、Grid token 继续校验，Deck 未认证接口不暴露到宿主网络。没有借用现有普通窗口的控制端口。
+
+实际应用命令：`python3 -B tests/artcraft_integration.py --xvfb /临时工具目录/usr/bin/Xvfb`。使用带认证 cookie 的独立 Unix-socket Xvfb、私有 XDG/profile、生成的 DOCX/XLSX/PPTX 和临时模拟挂载；检查真实编辑器进程的 DISPLAY、配置目录、数据目录和网络命名空间。最终运行三种应用各两次，共 **6 次正常退出**：
+
+- 真实插入文本、单元格或幻灯片后，原生保存文件确有新增标记；挂载源文件在周期到期前不变，关闭后提交最新文件。
+- WordCraft 原生 `file.autosave false/true` 的暂停和恢复生效；暂停期间的新编辑不写入本地工作文件，恢复后才保存。
+- 各应用再次打开和关闭未改文档，源文件 fingerprint 不变；WordCraft 初始化的本地重序列化不会触发源文件重写。
+- 通过原生 Close 的确认及文档/窗口列表确认受跟踪文档关闭，再观察编辑器自然退出。WordCraft 关闭最后一个文件可能留下新的空白文档；GridCraft 的最后文档关闭同时退出窗口。测试按实际行为核验，不能仅凭 PID 推断文档已关闭。
+- 干净退出且提交成功后，会话工作文件、复制配置、日志、缓存均删除；测试结束后未发现本次专用编辑器或 Xvfb 进程。
+
+首轮隔离核验因 `/proc/1/ns/net` 权限拒绝而停止，修正为启动器预先记录宿主网络 namespace 并核对独立 namespace/仅有 loopback；另两次早期 harness 对最后文档关闭的假设不符，已只对那两次专用编辑器进程组执行失败清理，没有称其为正常退出。修正后完整实测通过。测试未使用用户正常显示、日常 Office profile、真实 TwoDrive 挂载或用户文档；未验证 OneDrive 端到端上传。
+
+从仅含本次提交的干净 worktree 运行：**68 项 Python、22 项 Node 测试通过**，其中 Artcraft 新增 **14 项**；该干净源码下的三款真实应用测试也通过。工作目录额外包含之前未提交的 Wine/生命周期修复，其扩展回归为 83/24 项通过，但这些旧改动没有混入本次提交或安装包。
+
+新增单元验证覆盖：原生本地保存→周期发布、未改不写、断挂载保留未入队工作文件、外部冲突、符号链接变化、损坏导出拒绝、目录外显式副本、私有 profile、强制网络隔离、Deck 唯一路径/对话框/暂停保护、显式恢复、待同步阻止重开，以及安装器不启动编辑器。格式只承诺 DOCX/XLSX/PPTX；未测复杂样本、宏/加密、其他 Artcraft 版本、普通入口的已有窗口或真实云上传。详细安装与恢复操作见 [artcraft.md](artcraft.md)。
