@@ -11,7 +11,7 @@ def build(root=ROOT):
     dist = root / "dist"
     dist.mkdir(exist_ok=True)
     target = dist / "twodrive-artcraft-0.1.0-linux.zip"
-    files = ["LICENSE", "docs/artcraft.md", "scripts/install_artcraft.py"]
+    files = ["LICENSE", "docs/artcraft.md", "docs/verification.md", "scripts/install_artcraft.py", "scripts/build_artcraft.py"]
     files += [f"twodrive_office/{name}.py" for name in ("__init__", "artcraft", "policy", "local_save", "bridge", "lifecycle")]
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         for name in files:
