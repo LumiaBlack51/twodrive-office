@@ -1,4 +1,4 @@
-# TwoDrive Craft 普通插件 0.2.0-preview.1
+# TwoDrive Craft 普通插件 0.2.0-preview.2
 
 **已实现协议预览，暂不安装。** 当前官方 WordCraft 0.18.1、GridCraft 0.19.1、DeckCraft 0.18.1 没有公共插件宿主。插件面向尚未合并的共同插件协议 2.2；需等官方发布包含相应接口的版本，再核对协议并进行应用内验证。预览包不表示官方已经支持。
 
@@ -27,7 +27,7 @@ python3 -B scripts/install_artcraft.py
 
 第二条命令现在只是只读兼容性检查：使用临时 XDG 配置运行 `*-cli commands`，不启动图形编辑器、不安装、不创建额外应用入口。发现 `plugins.load/list` 也仅表示存在候选宿主，还需核对官方协议 2.2、稳定文档 id、事件及原生对话框能力。
 
-输出包为 `dist/twodrive-artcraft-plugin-0.2.0-preview.1-linux.zip` 和 `.sha256`。ZIP 根目录包含 `plugin.json`、`main.py` 和配套 Python 模块。当前只交付预览包，**不要复制进日常 Office 插件目录，也不要编译非官方 Office 替换正常版本**。
+输出包为 `dist/twodrive-artcraft-plugin-0.2.0-preview.2-linux.zip` 和 `.sha256`。ZIP 根目录包含 `plugin.json`、`main.py` 和配套 Python 模块。当前只交付预览包，**不要复制进日常 Office 插件目录，也不要编译非官方 Office 替换正常版本**。
 
 待官方支持后，先核对本说明及官方发布记录，再校验 ZIP、解压到插件专用目录，通过官方插件管理器加载这个完整目录。仓库中的 `artcraft/` 清单用于开发；源代码安装器若只复制该子目录会缺失共享模块，故应使用完整发布 ZIP。不要使用本仓库其他 Office 的安装包。尚未验证未来官方插件管理器的具体安装步骤。
 

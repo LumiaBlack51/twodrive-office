@@ -242,6 +242,75 @@ class PluginTests(unittest.TestCase):
             other.enable(self.info(), "wordcraft", str(self.settings.copy_directory), 5)
         self.assertEqual(other.pending()[0]["label"], "修订写入中断")
 
+    def test_pause_and_close_keep_failed_final_capture_across_multiple_ticks(self):
+        for action in ("pause", "close"):
+            with self.subTest(action=action):
+                runtime = plugin.Plugin(self.settings, root=self.root / action, clock=lambda: self.now)
+                runtime.handle("initialize", initialization())
+                self.addCleanup(runtime.shutdown)
+                manager = runtime.manager()
+                state = manager.enable(self.info(), "wordcraft", str(self.mount / action), 5)
+                if action == "pause":
+                    manager.disable("doc-1")
+                else:
+                    runtime.handle("events/documentClosed", self.info())
+                real = plugin.durable_replace
+                def interrupted(path, content):
+                    if path == state.manifest:
+                        raise OSError("interrupted final manifest")
+                    real(path, content)
+                with patch.object(plugin, "durable_replace", side_effect=interrupted):
+                    for _ in range(5):
+                        runtime.tick()
+                        self.assertTrue(state.final_capture)
+                        self.assertIn("interrupted final manifest", state.error)
+                        self.assertEqual(len(list(state.directory.glob("*.document"))), 1)
+                        self.assertTrue(manager.status("doc-1")["pending"])
+                        self.assertIn(state, manager.retired)
+                # A successful final capture clears the failure and permits cleanup.
+                runtime.tick()
+                self.assertFalse(state.final_capture)
+                self.assertEqual(state.error, "")
+                self.assertEqual(state.plan.target.read_bytes(), package())
+                self.assertFalse(state.directory.exists())
+                self.assertNotIn(state, manager.retired)
+                runtime.shutdown()
+
+    def test_retired_cleanup_preserves_unregistered_blob_after_later_success(self):
+        self.enable()
+        state = self.state()
+        self.command("pause")
+        real = plugin.durable_replace
+        def interrupted(path, content):
+            if path == state.manifest:
+                raise OSError("first manifest interrupted")
+            real(path, content)
+        with patch.object(plugin, "durable_replace", side_effect=interrupted):
+            self.runtime.tick()
+        orphan = next(state.directory.glob("*.document"))
+        before = orphan.read_bytes()
+        newer = package(text="newer native save after failed final capture")
+        self.source.write_bytes(newer)
+        for _ in range(5):
+            self.runtime.tick()
+            self.assertEqual(orphan.read_bytes(), before)
+            self.assertIn(state, self.runtime.manager().retired)
+        self.assertFalse(state.final_capture)
+        self.assertFalse(state.manifest.exists())
+        self.assertEqual(state.plan.target.read_bytes(), newer)
+        self.assertTrue(self.runtime.manager().status("doc-1")["pending"])
+
+    def test_save_as_retirement_does_not_clear_prior_capture_failure(self):
+        self.enable()
+        state = self.state()
+        with patch.object(plugin, "durable_replace", side_effect=OSError("disk full")):
+            self.runtime.tick()
+        self.runtime.handle("events/documentSaved", self.info(path=str(self.root / "other.docx")))
+        for _ in range(3):
+            self.runtime.tick()
+            self.assertIn("disk full", state.error)
+            self.assertIn(state, self.runtime.manager().retired)
+
     def test_corrupt_source_and_changed_recovery_digest_are_refused(self):
         self.enable()
         state = self.state()

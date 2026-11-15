@@ -26,7 +26,7 @@ from .bridge import MAX_CONTENT, validate_document
 from .local_save import LocalSaveQueue, durable_replace, state_directory
 from .policy import Settings, SaveError, SavePlan, check_source, fingerprint, normalized, plan_save, within
 
-VERSION = "0.2.0-preview.1"
+VERSION = "0.2.0-preview.2"
 APPS = {"wordcraft": {"docx", "odt"}, "gridcraft": {"xlsx", "ods"}, "deckcraft": {"pptx", "odp"}}
 MAX_LINE = 2 * 1024 * 1024
 MAX_DOCUMENTS = 100
@@ -91,6 +91,7 @@ class CopySession:
     captured: str = ""
     published: str = ""
     error: str = ""
+    capture_error: str = ""
     closed: bool = False
     final_capture: bool = False
     force: bool = False
@@ -134,13 +135,16 @@ class CopySession:
             old.unlink(missing_ok=True)
 
     def tick(self):
-        capture_error = ""
         if not self.closed or self.final_capture:
             try:
                 self.capture()
+                self.final_capture = False
+                self.capture_error = ""
             except (SaveError, OSError, ValueError) as exc:
-                capture_error = str(exc)
-            self.final_capture = False
+                self.capture_error = str(exc)
+                # A close/pause only retires tracking after the final snapshot
+                # is durable. Keep retrying; a later tick must not hide failure
+                # and sweep a complete blob whose manifest write was interrupted.
         try:
             self.record.validate()  # Mount, destination and conflicts on every attempt.
             if self.blob and self.captured != self.published:
@@ -155,7 +159,7 @@ class CopySession:
                     self.manifest.unlink(missing_ok=True)
                     self.blob.unlink(missing_ok=True)
                     self.captured = ""
-            self.error = capture_error
+            self.error = self.capture_error
         except (SaveError, OSError, ValueError) as exc:
             self.error = str(exc)
         self.force = False
@@ -243,7 +247,9 @@ class Copies:
                 return
             for state in [*self.active.values(), *self.retired]:
                 state.tick()
-                if state.closed and not state.error and state.record.blob is None and not state.manifest.exists():
+                if (state.closed and not state.final_capture and not state.error
+                        and state.record.blob is None and not state.manifest.exists()
+                        and not any(state.directory.glob("*.document"))):
                     state.record.release()
                     self.queue.records.remove(state.record)
                     self.retired.remove(state)
@@ -258,7 +264,7 @@ class Copies:
                 state = next((s for s in reversed(self.retired) if s.info["id"] == key), None)
             if state is None:
                 return {"enabled": False, "status": "未启用", "saved_versions_only": True}
-            pending = state.manifest.exists() or state.record.blob is not None
+            pending = state.manifest.exists() or state.record.blob is not None or any(state.directory.glob("*.document"))
             label = "需要处理" if state.error else ("已本地暂存，等待提交" if pending else ("已提交挂载目录" if state.published else "等待读取已保存版本"))
             return {"enabled": enabled, "status": label + ("（已暂停）" if not enabled else ""),
                     "error": state.error, "target": str(state.plan.target), "pending": pending,

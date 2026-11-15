@@ -1,7 +1,7 @@
 {
   "id": "org.twodrive.saved-sync",
   "name": "TwoDrive",
-  "version": "0.2.0-preview.1",
+  "version": "0.2.0-preview.2",
   "description": "自动同步编辑器已保存的版本到 TwoDrive；保留原生 AutoSave 行为。",
   "homepage": "https://github.com/LumiaBlack51/twodrive-office",
   "apps": ["wordcraft", "gridcraft", "deckcraft"],
