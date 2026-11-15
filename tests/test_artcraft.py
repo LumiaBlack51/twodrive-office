@@ -180,7 +180,7 @@ class ArtcraftTests(unittest.TestCase):
         home = self.root / "home with spaces"
         executable = self.root / "wordcraft"
         executable.write_text("fixture executable, must never run")
-        with patch("subprocess.Popen", side_effect=AssertionError("installer must not start editors")):
+        with patch("subprocess.Popen", side_effect=AssertionError("installer must not start editors")), patch("scripts.install_artcraft.shutil.which", return_value="/usr/bin/bwrap"):
             launchers = install(home=home, data_home=home / "data", executables={"wordcraft": executable})
         self.assertEqual(len(launchers), 1)
         manager = home / ".local/bin/twodrive-artcraft"
