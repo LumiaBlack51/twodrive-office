@@ -317,3 +317,28 @@ Dot 对 PR #10 的 35accd5 提出两项 P1：恢复旧会话可能替换同一�
 新增 6 项回归：未入队的离线 A 阻止重开；模拟旧版允许 B 另开并 stage 后恢复 A，确认 A、B、pending blob 和清单均不变；匹配的本会话 pending 可恢复；相同内容但 selected expected 不同仍拒绝；读取中替换源文件拒绝；读取后到会话注册间更新源文件拒绝且保留外部新版本。Artcraft 单元测试共 20 项通过。 修复后的干净 worktree 全量 **74 项 Python、22 项 Node** 通过；三款实际应用各两次的隔离测试再次通过，确认原生修改、本地保存、挂载发布、未改不写、文档关闭和 6 次自然退出。
 
 发布门禁增加检查 Dot 的最新评论，并在后续提交后复查。独立 PR 审查并不等于执行过真实应用或云端测试；这次仍使用私有 Xvfb 和临时模拟挂载，不向真实 TwoDrive/OneDrive 写入测试内容。
+
+
+## Craft 普通插件 0.2.0-preview.1 · 2026-11-15
+
+当前交付改为由插件宿主加载的普通 Python 插件，替代 0.1.1 的专用启动器流程。不会修改原生 AutoSave、Office 二进制、日常配置或文档保存点；未安装到用户 Office。原先 companion 的原生应用测试仅属历史结果，不能作为新插件的应用内验证。旧恢复程序与唯一修订应保留。
+
+### 宿主兼容性
+
+- 本机官方 WordCraft 0.18.1、GridCraft 0.19.1、DeckCraft 0.18.1 的 `*-cli commands` 均缺少 `plugins.load/list`。只读检查使用临时 XDG 配置，无 DISPLAY/Wayland；没有启动图形编辑器。官方宿主尚不满足要求，按用户要求等待支持后再安装。
+- 实现针对共同协议 2.2 的未合并提案：[WordCraft #2586](https://github.com/storytold/wordcraft/pull/2586) / `74eaa3184f2408b1fe76f210075370b913916551`；[GridCraft #1123](https://github.com/storytold/gridcraft/pull/1123) / `3e325c1c2c2e35cf7acc6c01bda8b326739ec0a3`；[DeckCraft #919](https://github.com/storytold/deckcraft/pull/919) / `4763e9497687ac260d6cb5d83f3f86c3ea3206d1`。清单要求 `>=2.2, <3` 及 dialogs/document/events；握手 protocolVersion 仍为整数 1。源文件摘要记录在 `artcraft/protocol-sources.json`。这不是官方已发布 API 的支持声明。
+- 共同协议没有完整未保存文档的通用导出方法；文档保存事件也明确不包含原生 AutoSave 写盘。插件轮询磁盘，只同步完整已保存文件到独立副本，六种格式为 DOCX/XLSX/PPTX/ODT/ODS/ODP。未保存修改须由编辑器原生保存处理；不执行 `file.save`、`host/sync` 或编辑器操作，不清未保存标记。
+
+### 实际验证
+
+从仅含本次改动的干净暂存树运行，全量 **95 项 Python、22 项 Node 测试通过**；其中新普通插件 **22 项**，旧 companion 保留 19 项恢复/安全测试，撤销旧安装器测试。OXT、ONLYOFFICE 包和普通插件 ZIP 构建通过。旧 Wine DLL 本地构建因未安装 MinGW 编译器未执行成功；本次没有 Wine 实现改动，GitHub CI 的相应步骤另行核对。
+
+原有 close-beacon 测试曾因两次构造 ZIP 跨越时间戳边界而出现字节比较失败；固定测试样本 ZIP 时间戳后，完整回归通过，生产保存逻辑未因此改变。
+
+新增回归覆盖六格式副本与源保护、包含挂载内源文件、原生已保存版本无需事件也能被发现、未改副本不重写、断挂载持久化与重开阻止、每次目标检查、目标外部修改/链接、源读取中替换拒绝、源读取期间目标变更拒绝、内容回退不会误提交较旧 pending、本地写失败重试、清单写入中断保留完整孤立文件、不同根目录的另一份 pending 不被恢复替换、摘要破损、含宏/加密快照拒绝、暂停仍报告失败修订、恢复仅导出挂载外新文件、另存为暂停/关闭提交、表单绑定稳定文档 id、无编辑器操作、错误帧/通知/EOF/关闭、只读宿主检查。
+
+`tests/artcraft_host_conformance.py` 分别编译固定提案的实际 `process.rs`、`push.rs`、`dialog.rs`，配以最小 Manifest/锁/标识辅助代码，与插件子进程执行握手、原生表单解析、启用、立即提交、无 saved 事件的磁盘更新、状态、关闭与 shutdown。三款通信/对话框模块均通过，包括对干净发布 ZIP 解压后的完整程序运行。它不是完整插件宿主、Office 引擎、原生窗口、Ribbon 点击或官方插件管理器测试。发布 ZIP 可复现，根目录入口与模块自包含，校验文件与 ZIP 一致。
+
+所有写入仅使用临时模拟挂载、生成文档和独立配置/状态，没有测试真实 TwoDrive 挂载或 OneDrive 上传。默认 180 秒提交策略由可控时钟的既有队列测试覆盖；本轮插件模块一致性测试使用 1 秒间隔。失败内容保留在本插件独立 artcraft-plugin 状态目录，退出不运行独立常驻进程；恢复不自动发布旧版本。
+
+发布前及追加提交后复查 Dot。已有两项 P1 继续作为回归边界；不能将旧提交的“无新增阻塞”套用为新插件审查结果。新提交的审查/CI 状态以 PR #10 最新记录为准。临时源码、Rust 目标/注册表副本、测试目录与旧 companion 发行制品在交付后清理；保留当前普通插件发行包、必要旧恢复程序及所有唯一恢复数据。

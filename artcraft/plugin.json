@@ -1,0 +1,22 @@
+{
+  "id": "org.twodrive.saved-sync",
+  "name": "TwoDrive",
+  "version": "0.2.0-preview.1",
+  "description": "自动同步编辑器已保存的版本到 TwoDrive；保留原生 AutoSave 行为。",
+  "homepage": "https://github.com/LumiaBlack51/twodrive-office",
+  "apps": ["wordcraft", "gridcraft", "deckcraft"],
+  "run": {"command": "python3", "args": ["-B", "main.py"]},
+  "requires": {"protocol": ">=2.2, <3", "features": ["dialogs", "document", "events"]},
+  "events": ["documentOpened", "documentSaved", "documentClosed"],
+  "commands": [
+    {"id": "settings", "label": "自动同步", "description": "设置已保存版本的自动同步。"},
+    {"id": "apply", "label": "应用设置"},
+    {"id": "sync", "label": "立即同步", "description": "同步磁盘上的已保存版本，不保存编辑器未保存的修改。"},
+    {"id": "pause", "label": "暂停同步"},
+    {"id": "status", "label": "保存状态"},
+    {"id": "pending", "label": "保留修订"}
+  ],
+  "ui": {"ribbon": [{"tab": "TwoDrive", "group": "已保存版本同步", "buttons": [
+    {"command": "settings"}, {"command": "sync"}, {"command": "pause"}, {"command": "status"}, {"command": "pending"}
+  ]}]}
+}

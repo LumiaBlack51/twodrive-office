@@ -9,15 +9,14 @@ from unittest.mock import patch
 from twodrive_office.artcraft import WorkingSession, private_environment, recover_session, verify_namespace
 from twodrive_office.local_save import LocalSaveQueue
 from twodrive_office.policy import Settings, SaveError, fingerprint, plan_save
-from scripts.install_artcraft import install
 
 
 def document(extension="docx", text="original"):
     main = {"docx": "word/document.xml", "xlsx": "xl/workbook.xml", "pptx": "ppt/presentation.xml"}[extension]
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w") as archive:
-        archive.writestr("[Content_Types].xml", "<Types/>")
-        archive.writestr(main, f"<document>{text}</document>")
+        archive.writestr(zipfile.ZipInfo("[Content_Types].xml"), "<Types/>")
+        archive.writestr(zipfile.ZipInfo(main), f"<document>{text}</document>")
     return out.getvalue()
 
 
@@ -175,21 +174,6 @@ class ArtcraftTests(unittest.TestCase):
             recover_session(s.directory, self.settings)
         self.assertEqual(self.source.read_bytes(), edited)
         self.assertFalse(s.directory.exists())
-
-    def test_install_adds_separate_launchers_without_starting_editors(self):
-        home = self.root / "home with spaces"
-        executable = self.root / "wordcraft"
-        executable.write_text("fixture executable, must never run")
-        with patch("subprocess.Popen", side_effect=AssertionError("installer must not start editors")), patch("scripts.install_artcraft.shutil.which", return_value="/usr/bin/bwrap"):
-            launchers = install(home=home, data_home=home / "data", executables={"wordcraft": executable})
-        self.assertEqual(len(launchers), 1)
-        manager = home / ".local/bin/twodrive-artcraft"
-        text = manager.read_text()
-        self.assertIn("--unshare-net", text)
-        self.assertIn("TWODRIVE_ARTCRAFT_HOST_NETNS", text)
-        self.assertIn("-B -m", text)
-        self.assertTrue((home / "data/applications/org.twodrive.wordcraft.desktop").exists())
-        self.assertFalse((home / ".config/wordcraft").exists())
 
     def test_pending_conflict_blocks_new_session_and_recovery(self):
         s = self.session()
