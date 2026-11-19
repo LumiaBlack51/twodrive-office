@@ -60,6 +60,44 @@ struct V : VARIANT {
     return r.lVal;
   }
 };
+inline std::string utf8(const std::wstring &s);
+struct DispatchException : EXCEPINFO {
+  DispatchException() : EXCEPINFO{} {}
+  ~DispatchException() {
+    SysFreeString(bstrSource);
+    SysFreeString(bstrDescription);
+    SysFreeString(bstrHelpFile);
+  }
+};
+struct ComError : std::runtime_error {
+  HRESULT hresult;
+  SCODE scode;
+  WORD code;
+  static std::string message(const wchar_t *name, HRESULT hr,
+                             const EXCEPINFO &info) {
+    char number[100];
+    sprintf(number, " error %08lx", (unsigned long)hr);
+    auto result = "COM " + utf8(name) + number;
+    if (info.scode) {
+      sprintf(number, " (Office %08lx)", (unsigned long)info.scode);
+      result += number;
+    }
+    if (info.wCode)
+      result += " (Office " + std::to_string(info.wCode) + ")";
+    if (info.bstrDescription) {
+      try {
+        result += ": " + utf8(std::wstring(info.bstrDescription,
+                                           SysStringLen(info.bstrDescription)));
+      } catch (const std::runtime_error &) {
+        // Keep the HRESULT even when the server's description is malformed.
+      }
+    }
+    return result;
+  }
+  ComError(const wchar_t *name, HRESULT hr, const EXCEPINFO &info)
+      : std::runtime_error(message(name, hr, info)), hresult(hr),
+        scode(info.scode), code(info.wCode) {}
+};
 struct D {
   IDispatch *p = nullptr;
   D() = default;
@@ -104,23 +142,14 @@ struct D {
       params.cNamedArgs = 1;
     }
     V result;
-    EXCEPINFO info = {};
+    DispatchException info;
     UINT error = 0;
     HRESULT hr = p->Invoke(id, IID_NULL, LOCALE_USER_DEFAULT, flags, &params,
                            &result, &info, &error);
-    if (info.bstrSource)
-      SysFreeString(info.bstrSource);
-    if (info.bstrDescription)
-      SysFreeString(info.bstrDescription);
-    if (info.bstrHelpFile)
-      SysFreeString(info.bstrHelpFile);
     if (FAILED(hr)) {
-      char error[100];
-      std::string property;
-      for (auto c = name; *c; ++c)
-        property += (char)*c;
-      sprintf(error, "COM %s error %08lx", property.c_str(), (unsigned long)hr);
-      throw std::runtime_error(error);
+      if (hr == DISP_E_EXCEPTION && info.pfnDeferredFillIn)
+        info.pfnDeferredFillIn(&info);
+      throw ComError(name, hr, info);
     }
     return result;
   }
@@ -213,6 +242,23 @@ inline std::string field(const std::string &json, const std::string &key) {
   }
   throw std::runtime_error("Truncated response");
 }
+inline bool bool_field(const std::string &json, const std::string &key) {
+  auto p = json.find('"' + key + '"');
+  if (p == std::string::npos)
+    throw std::runtime_error("Missing response field");
+  p = json.find(':', p);
+  if (p == std::string::npos)
+    throw std::runtime_error("Invalid boolean response field");
+  p = json.find_first_not_of(" \t\r\n", p + 1);
+  for (auto value : {std::string("true"), std::string("false")}) {
+    if (p != std::string::npos && json.compare(p, value.size(), value) == 0) {
+      auto end = json.find_first_not_of(" \t\r\n", p + value.size());
+      if (end != std::string::npos && (json[end] == ',' || json[end] == '}'))
+        return value == "true";
+    }
+  }
+  throw std::runtime_error("Invalid boolean response field");
+}
 inline std::string hex(const std::string &s) {
   const char *h = "0123456789abcdef";
   std::string r;
@@ -222,6 +268,20 @@ inline std::string hex(const std::string &s) {
   }
   return r;
 }
+inline std::string read_file(HANDLE h) {
+  LARGE_INTEGER size;
+  if (!GetFileSizeEx(h, &size) || size.QuadPart <= 0 ||
+      size.QuadPart > 128 * 1024 * 1024) {
+    throw std::runtime_error("Snapshot size rejected");
+  }
+  std::string r((size_t)size.QuadPart, 0);
+  DWORD n = 0;
+  BOOL ok = ReadFile(h, r.data(), (DWORD)r.size(), &n, nullptr);
+  if (!ok || n != r.size())
+    throw std::runtime_error("Incomplete snapshot");
+  return r;
+}
+
 inline std::string read_file(const std::wstring &path) {
   HANDLE h = CreateFileW(path.c_str(), GENERIC_READ,
                          FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
@@ -229,40 +289,72 @@ inline std::string read_file(const std::wstring &path) {
   if (h == INVALID_HANDLE_VALUE)
     throw std::runtime_error("Cannot read snapshot, Win32 " +
                              std::to_string(GetLastError()));
-  LARGE_INTEGER size;
-  if (!GetFileSizeEx(h, &size) || size.QuadPart <= 0 ||
-      size.QuadPart > 128 * 1024 * 1024) {
+  try {
+    auto bytes = read_file(h);
     CloseHandle(h);
-    throw std::runtime_error("Snapshot size rejected");
+    return bytes;
+  } catch (...) {
+    CloseHandle(h);
+    throw;
   }
-  std::string r((size_t)size.QuadPart, 0);
-  DWORD n = 0;
-  BOOL ok = ReadFile(h, r.data(), (DWORD)r.size(), &n, nullptr);
-  CloseHandle(h);
-  if (!ok || n != r.size())
-    throw std::runtime_error("Incomplete snapshot");
-  return r;
 }
 
 // Keep only a 32-byte fingerprint in Office, rather than another full document.
 #include <wincrypt.h>
-inline std::string digest(const std::string &data) {
+class SnapshotHash {
   HCRYPTPROV provider = 0;
   HCRYPTHASH hash = 0;
-  if (!CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_AES,
-                            CRYPT_VERIFYCONTEXT))
-    throw std::runtime_error("Snapshot hash unavailable");
-  BYTE bytes[32];
-  DWORD count = 32;
-  BOOL ok = CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash);
-  if (ok)
-    ok = CryptHashData(hash, (const BYTE *)data.data(), (DWORD)data.size(), 0);
-  if (ok)
-    ok = CryptGetHashParam(hash, HP_HASHVAL, bytes, &count, 0);
-  if (hash)
+public:
+  SnapshotHash() {
+    if (!CryptAcquireContextW(&provider, nullptr, nullptr, PROV_RSA_AES, CRYPT_VERIFYCONTEXT))
+      throw std::runtime_error("Snapshot hash unavailable");
+    if (!CryptCreateHash(provider, CALG_SHA_256, 0, 0, &hash)) {
+      CryptReleaseContext(provider, 0);
+      throw std::runtime_error("Snapshot hashing failed");
+    }
+  }
+  SnapshotHash(const SnapshotHash &) = delete;
+  ~SnapshotHash() {
     CryptDestroyHash(hash);
-  CryptReleaseContext(provider, 0);
-  if (!ok || count != 32)
-    throw std::runtime_error("Snapshot hashing failed");
-  return std::string((const char *)bytes, 32);
+    CryptReleaseContext(provider, 0);
+  }
+  void add(const void *data, DWORD size) {
+    if (!CryptHashData(hash, static_cast<const BYTE *>(data), size, 0))
+      throw std::runtime_error("Snapshot hashing failed");
+  }
+  std::string finish() const {
+    BYTE bytes[32];
+    DWORD size = sizeof(bytes);
+    if (!CryptGetHashParam(hash, HP_HASHVAL, bytes, &size, 0) || size != sizeof(bytes))
+      throw std::runtime_error("Snapshot hashing failed");
+    return std::string(reinterpret_cast<char *>(bytes), size);
+  }
+};
+inline std::string digest(const std::string &data) {
+  SnapshotHash hash;
+  hash.add(data.data(), static_cast<DWORD>(data.size()));
+  return hash.finish();
+}
+inline DWORD snapshot_size(HANDLE file) {
+  LARGE_INTEGER size;
+  if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 || size.QuadPart > 128*1024*1024)
+    throw std::runtime_error("Snapshot size rejected");
+  return static_cast<DWORD>(size.QuadPart);
+}
+template <typename Consume>
+void read_blocks(HANDLE file, DWORD remaining, Consume consume) {
+  std::vector<BYTE> block(256 * 1024);
+  while (remaining) {
+    DWORD count = 0;
+    DWORD wanted = (std::min)(remaining, static_cast<DWORD>(block.size()));
+    if (!ReadFile(file, block.data(), wanted, &count, nullptr) || count == 0)
+      throw std::runtime_error("Incomplete snapshot");
+    consume(block.data(), count);
+    remaining -= count;
+  }
+}
+inline std::string digest_file(HANDLE file) {
+  SnapshotHash hash;
+  read_blocks(file, snapshot_size(file), [&](const BYTE *data, DWORD count) { hash.add(data, count); });
+  return hash.finish();
 }

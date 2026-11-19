@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import tempfile
@@ -8,7 +9,7 @@ from pathlib import Path
 
 from twodrive_office.bridge import Bridge
 from twodrive_office.policy import Settings, SaveError, fingerprint
-from twodrive_office.wine import flat_opc, save_office, prepare_native, complete_native
+from twodrive_office.wine import flat_opc, save_office, prepare_native, complete_native, complete_native_digest
 
 
 def document(text='original'):
@@ -78,6 +79,20 @@ class WineQueueTests(unittest.TestCase):
         complete_native(self.bridge, self.key, self.content, token)
         self.assertFalse(self.bridge.local_saves.pending())
         self.assertEqual(self.bridge.sessions[self.key].local.expected, fingerprint(self.source))
+
+    def test_native_digest_rejects_stale_wrong_and_replayed_confirmations(self):
+        self.stage()
+        token = prepare_native(self.bridge, self.key)['native_token']
+        self.source.write_bytes(self.content)
+        digest = hashlib.sha256(self.content).hexdigest().encode()
+        for checksum, approval in [(b'0' * 64, token), (digest, 'wrong')]:
+            with self.assertRaises(SaveError):
+                complete_native_digest(self.bridge, self.key, checksum, approval)
+            self.assertTrue(self.bridge.local_saves.pending())
+        complete_native_digest(self.bridge, self.key, digest, token)
+        self.assertFalse(self.bridge.local_saves.pending())
+        with self.assertRaises(SaveError):
+            complete_native_digest(self.bridge, self.key, digest, token)
 
     def test_failed_native_save_or_stale_ack_preserves_revision(self):
         self.stage(); token = prepare_native(self.bridge, self.key)['native_token']
