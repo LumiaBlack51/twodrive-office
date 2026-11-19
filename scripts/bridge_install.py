@@ -22,7 +22,7 @@ def install_bridge(settings):
         "[Unit]", "Description=TwoDrive Office local save bridge (on demand)",
         "Requires=twodrive-office-bridge.socket", "After=twodrive-office-bridge.socket", "",
         "[Service]", "Type=simple", "ExecStart=/usr/bin/python3 -m twodrive_office.cli serve --idle-timeout 30",
-        "WorkingDirectory=%h/.local/lib/twodrive-office", "Restart=on-failure", "RestartSec=5",
+        "WorkingDirectory=%h/.local/lib/twodrive-office", "Restart=no",
         "Nice=10", "IOSchedulingClass=best-effort", "IOSchedulingPriority=7", "UMask=0077", "",
     ])
     unit_path.write_text(unit)

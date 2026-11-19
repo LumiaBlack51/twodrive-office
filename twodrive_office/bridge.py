@@ -28,24 +28,33 @@ def document_content_digest(content: bytes, extension: str):
     checksum = hashlib.sha256()
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         for item in sorted(archive.infolist(), key=lambda item: item.filename):
-            data = archive.read(item)
-            if extension in ("docx", "xlsx", "pptx") and item.filename == "docProps/core.xml":
-                try:
-                    root = ET.fromstring(data, parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True)))
-                    # x2t/native export advances this field even when the model
-                    # is unchanged. Preserve every other property and every
-                    # byte of slide/text/media/relationship parts in the hash.
-                    for child in list(root):
-                        if child.tag == "{http://purl.org/dc/terms/}modified":
-                            root.remove(child)
-                    data = ET.tostring(root, encoding="utf-8")
-                except ET.ParseError:
-                    pass  # Unrecognized metadata is compared verbatim.
             name = item.filename.encode()
             checksum.update(len(name).to_bytes(8, "big"))
             checksum.update(name)
-            checksum.update(len(data).to_bytes(8, "big"))
-            checksum.update(data)
+            volatile = set()
+            if extension in ("docx", "xlsx", "pptx") and item.filename == "docProps/core.xml":
+                volatile.add("{http://purl.org/dc/terms/}modified")
+                if extension == "pptx":
+                    volatile.add("{http://schemas.openxmlformats.org/package/2006/metadata/core-properties}revision")
+            if extension == "pptx" and item.filename == "docProps/app.xml":
+                volatile.add("{http://schemas.openxmlformats.org/officeDocument/2006/extended-properties}TotalTime")
+            if volatile and item.file_size <= 1024 * 1024:
+                data = archive.read(item)
+                try:
+                    root = ET.fromstring(data, parser=ET.XMLParser(target=ET.TreeBuilder(insert_comments=True, insert_pis=True)))
+                    for child in list(root):
+                        if child.tag in volatile:
+                            root.remove(child)
+                    data = ET.tostring(root, encoding="utf-8")
+                except ET.ParseError:
+                    pass
+                checksum.update(len(data).to_bytes(8, "big"))
+                checksum.update(data)
+            else:
+                checksum.update(item.file_size.to_bytes(8, "big"))
+                with archive.open(item) as member:
+                    while block := member.read(256 * 1024):
+                        checksum.update(block)
     return checksum.hexdigest()
 
 
@@ -53,8 +62,12 @@ def validate_document(content: bytes, extension: str):
     """Reject HTML error pages, empty exports, and mismatched document containers."""
     if not content or len(content) > MAX_CONTENT:
         raise SaveError("导出文件为空或超过 128 MiB")
+    validate_package(io.BytesIO(content), extension)
+
+
+def validate_package(source, extension):
     try:
-        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        with zipfile.ZipFile(source) as archive:
             names = set(archive.namelist())
             main = {"docx": "word/document.xml", "xlsx": "xl/workbook.xml",
                     "pptx": "ppt/presentation.xml"}.get(extension)
@@ -100,6 +113,7 @@ class Session:
     native_publish: bool = False
     native_token: str = ""
     native_revision: int = 0
+    native_receipt: tuple | None = None
 
 
 class Bridge:
@@ -152,7 +166,8 @@ class Bridge:
             check_source(session.source)
             validate_document(content, session.plan.extension)
             content_digest = document_content_digest(content, session.plan.extension)
-            if content_digest == session.content_digest:
+            unchanged = content_digest == session.content_digest
+            if unchanged:
                 self.validate_unchanged_target(session)
             else:
                 session.local.settings = self.settings
@@ -163,7 +178,7 @@ class Bridge:
             session.content_digest = content_digest
             if revision is not None:
                 session.last_revision = revision
-        return self.saved_result(session)
+        return dict(self.saved_result(session), unchanged=unchanged)
 
     def saved_result(self, session):
         with session.local.lock:
@@ -372,6 +387,10 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
                     return self.respond(409, {"error": "close_request_rejected"})
             if not self.authorized():
                 return self.respond(401, {"error": "unauthorized"})
+            if self.path.startswith("/sessions/"):
+                with bridge.lock:
+                    if self.path.split("/")[2] not in bridge.sessions:
+                        return self.respond(404, {"error": "session_closed"})
             try:
                 if self.path.startswith("/sessions/") and self.path.endswith("/office"):
                     from .wine import save_office
@@ -384,6 +403,10 @@ def make_server(bridge: Bridge, port: int | None = None, *, listener=None):
                     from .wine import prepare_native
                     self.read_body(16384)
                     result = prepare_native(bridge, self.path.split("/")[2], explicit=self.path.endswith("/native-explicit"))
+                elif self.path.startswith("/sessions/") and self.path.endswith("/native-digest"):
+                    from .wine import complete_native_digest
+                    result = complete_native_digest(bridge, self.path.split("/")[2], self.read_body(64),
+                                                    self.headers.get("X-TwoDrive-Native-Token", ""))
                 elif self.path.startswith("/sessions/") and self.path.endswith("/native-complete"):
                     from .wine import complete_native
                     result = complete_native(bridge, self.path.removeprefix("/sessions/").removesuffix("/native-complete"),

@@ -18,7 +18,7 @@ def build(compiler=None, output=None):
     subprocess.run([str(compiler), '-std=c++17', '-O2', '-static', '-shared',
                     '-Wall', '-Wextra', '-Wno-unused-parameter', '-I' + str(ROOT / 'wine'),
                     str(ROOT / 'wine/AddIn.cpp'), '-o', str(output),
-                    '-lole32', '-loleaut32', '-luuid', '-lwinhttp', '-ladvapi32'], check=True)
+                    '-lcomctl32', '-lole32', '-loleaut32', '-luuid', '-lwinhttp', '-ladvapi32'], check=True)
     return output
 
 if __name__ == '__main__':

@@ -286,3 +286,213 @@ LibreOffice 实测发现：直接原子替换原文件会使后续 Ctrl+S 误判
 公开后从同一 CI 包安装到本机停止的 Microsoft365 bottle，并更新独立 Linux runtime 和已有 ONLYOFFICE 两种插件目录，runtime/ONLYOFFICE 共替换或新增 10 个程序文件，另写入 Wine 加载项及其连接配置。Wine DLL 摘要为 `d55f1c6fc5f73a79a7b02265aa998e143dfe3ce9e2635e61e718ef5bdc337e8b`；其八项 COM 注册之外的 system.reg 内容、完整 user.reg、连接凭据和 systemd unit 均保持原字节。仅保留一套少量旧程序回退材料。安装没有启动日常编辑器、创建真实文档会话或对真实挂载保存；日常 LibreOffice profile 未修改。认证 /settings 验证 socket 唤醒更新后的 bridge，空闲后 MainPID=0、服务 inactive/dead，只有现有用户管理器的 socket 继续监听。
 
 清理移除本轮临时 MinGW/clang 工具、9.8 GiB 测试 prefix、0.3.0 对照源码、探针/临时脚本/日志、Actions 原始解包及重复程序文件。被统计的已删除 payload 路径分配占用合计 11,020,439,552 字节；这不是整盘净空闲增加的声明。保留正式发布包、必要审计摘要、一套小范围程序回退和所有真实 pending/用户数据；没有扫描删除用户缓存或恢复材料，也没有修改 TwoDrive 本体/服务。本补记是文档收尾，不改变 v0.3.1 的不可移动发布源。
+
+## 未发布修复：cpak Wine 连接失败 · 2026-11-08
+
+截图的 `Bridge request failed; pending revision retained` 来自 Wine DLL 的 HTTP 传输。只读排查确认：连接文件与主机设置的端口、令牌和 prefix 相符，主机认证 `/settings` 返回 200；真实 PowerPoint 由 cpak 启动，网络命名空间与主机不同，slirp4netns 带 `--disable-host-loopback`。容器内 `127.0.0.1:19836` 连接被拒绝，经 `10.0.2.2` 亦不可达。授权文件在容器中使用 `/run/cpak/grants/...` 路径，原来按主机 dosdevices 解析的实现也不能正确定位该路径。只读核对了授权目录与主机目录的 inode 对应，没有对该真实目录执行保存测试。
+
+本地源码修复增加单端口 namespace relay：通过 `nsenter` 在指定同用户容器绑定回环 listener，将 FD 传回主机，仅转接既有 bridge 的端口；原 bridge 继续校验认证/Host/Origin 并持有唯一保存队列。namespace PID/启动时间改变后退出，同一 namespace/端口重复连接复用已就绪的 relay，不开启主机网络共享。cpak 启动器需要在文件授权/空闲容器刷新完成后、启动 Office 前调用新模块，安装方法见 [Wine 说明](wine.md#cpak-isolated-networking-unreleased-fix)。
+
+容器路径由同 prefix 的真实 Office 进程挂载表与主机挂载表转换，要求唯一的主机 inode 匹配并拒绝符号链接；每次采样/提交重新解析，陈旧 grant、歧义或源变化拒绝继续。DLL 在初次 `/settings` 失败时仍保留 STA 定时器，每 5 秒重试；配置有效前不处理文档，原位/副本模式使用 bridge 的返回值。传输失败提示不再声称尚未暂存的版本已经被保留；读取响应中断不作为保存成功。
+
+本轮验证：
+
+- Python 57 项、Node 22 项通过。新增真实 Linux user/network namespace 回归先复现隔离回环连接失败，再经 relay 验证无凭据 401、认证设置读取、模拟目录 DOCX 保存、会话清理、重复连接及 namespace 退出后的 relay/锁文件清理。路径回归覆盖挂载表转义、唯一 inode、歧义、陈旧 inode 和符号链接拒绝。
+- MinGW GCC 13.2 x64 编译 DLL 通过。Soda `11.0-37-office-v7` 在独立临时 Wine prefix、无 DISPLAY/Wayland/会话 DBus、禁用图形驱动的环境中运行 `tests/wine/HttpSmoke.cpp`：直接复用 DLL 的实际 Http 实现，连接失败诊断、同一客户端随后成功读取认证设置、原位/副本布尔字段及畸形响应拒绝通过。仅运行传输探针，没有创建 Office COM 应用或打开文档。
+- **没有对本轮补丁重跑真实 Word/Excel/PowerPoint 保存、STA 初始失败恢复或日常 ribbon 操作；此前 0.3.1 的真实应用结果不代表这个补丁已完成相同验证。没有真实 TwoDrive 保存或云端同步测试。**
+
+用户最终选择暂不停止当前 bottle、先保留修复，因此没有替换已安装 DLL、Linux runtime、启动器或注册表，没有启动/停止日常编辑器。源码和一个标为 unreleased 的候选补丁包保留待后续应用；正式 v0.3.1 发布包及标签不变。临时编译工具、下载、测试 prefix/文档/日志、探针二进制和项目 bytecode 在收尾移除，专用测试进程已退出；真实 pending/恢复数据保留。
+
+### 续检：真实挂载命名空间
+
+用户要求继续后，再次检测到 Microsoft365-Trio 的 PowerPoint 与 Wine 后台进程仍在运行，因此没有绕过停止检查、复制活动 profile 或替换已安装程序。新增独立 Linux user/mount namespace 测试：仅在私有 namespace 的 `/run` 上挂载 tmpfs，把临时模拟目录 bind 到 `/run/cpak/grants/...`，通过公共 `resolve_wine_path` 验证实际 mountinfo、大小写解析及主机 inode 对应；符号链接和 namespace 退出后路径均被拒绝。进程名称由 Python fixture 模拟，不是 Office 应用，不将此项记为真实 Office 保存测试。Python 总计 58 项通过；先前的 Node 22 项与原生 WinHTTP 结果不变。新增临时挂载、文件和专用测试进程已清理，候选包更新，安装及真实 Office 回归仍待源 bottle 正常停止。
+
+## 未发布修复：残留进程与后台生命周期 · 2026-11-08
+
+用户确认 PowerPoint 窗口已经关闭，但进程意外残留，另由 Office 团队处理。只读检查时，已安装的 bridge（PID 1581322）仍在运行约 1.5 小时，RSS 约 14 MiB、累计平均 CPU 约 0.2%，`NRestarts=0`。旧逻辑把任何当前用户的 Office 进程视为保留理由；提交失败或无法识别的 pending 也会触发无限重试。这两项都可能使 bridge 长期驻留，不能再用“关闭窗口后 30 秒退出”概括旧版行为。本轮没有终止任何日常 Office 进程，也未替换已安装 runtime、插件、单元或注册表；当前安装仍受旧逻辑影响。
+
+源码改为只由进行中的请求和认证请求/会话心跳续期，默认 30 秒空闲退出，不依赖 Office PID 消失。退出时安全尝试关闭/恢复；失败版本和损坏/未识别清单留在磁盘，不以继续驻留作为保留数据的条件。Office 进程检测仅用于阻止在旧内存模型仍可能存在时恢复文件，不能阻止 bridge 本身退出。CLI 默认不再永久常驻，拒绝 0、负数、NaN 和无限退出延迟。安装单元使用 `Restart=no`，保留按连接触发的 socket activation，不进行独立失败重启循环。
+
+ONLYOFFICE 对尚未修改的已开启会话也发送心跳，不导出、不写入文件；过期会话按正常安全校验重新建立。Wine 的既有 10 秒心跳保持，HTTP 明确识别 `session_closed`，下一轮重新建立会话。所有重建都受 pending 冲突保护，不能用旧编辑器内容覆盖恢复数据。此前关于最小化时通过进程存在永久保留会话的描述已被此源码修复取代；安装升级必须同步更新 runtime、Wine DLL 和已安装的 ONLYOFFICE 插件。
+
+待安装的 namespace relay 增加首连接前 60 秒启动宽限、连接完成后 30 秒无新连接退出；容器、残留 Office PID 都不能单独保留 relay。namespace 消失时通知转发线程停止，空闲连接不再阻碍线程池退出；锁文件通过 finally 清理。cpak 内没有独立的 socket activation：relay 空闲退出后，从仍开着的空白 Office 内部文件菜单打开文档不会自行重建 relay，需要再次运行主机启动器/hook。这个取舍和启动器集成尚未做真实 Office 验证，不能据此宣称可直接发布。
+
+本轮实际验证：
+
+- Python 65 项、Node 24 项通过。覆盖残留进程不能阻止退出、进行中的请求先完成、原生 pending/外部冲突保留、过期会话安全重建及恢复冲突阻止覆盖。真实 Linux user/network namespace 验证无首连接/连接结束后的 relay 退出，目标容器继续存活且锁文件清理；另覆盖 namespace 退出与无响应转发连接的收尾。
+- 独立 CLI 进程使用真实默认 30 秒配置，在系统仍有 Office 进程时于最后一次认证请求后 **30.05 秒**正常退出，监听端口关闭；临时模拟目录中的原文件字节不变、待恢复内容及清单完整保留。测试未接触真实 TwoDrive 保存。
+- 临时解包的 MinGW GCC 13.2 编译更新后的 DLL 和实际 WinHTTP 探针通过；Soda `11.0-37-office-v7` 在独立临时 prefix、隔离网络、禁用 DISPLAY/Wayland/图形驱动的环境中运行探针，确认断连、认证重连和过期会话的专门错误类型。没有创建 Office COM 应用或打开用户文档；真实 Office 的睡眠/节流恢复、完整保存和 cpak 启动器流程仍未验证。
+
+系统另有独立的 `twodrive-daemon.service`（挂载与同步）及 `twodrive-nautilus-watch.service`（Nautilus 响应诊断）正在常驻，它们不属于 Office bridge 生命周期，本轮未修改或停用。正式 0.3.1 包保持原样，只更新同一个未发布候选包。临时工具链、下载、探针、测试文档/prefix 和本轮专用进程在收尾清理；所有真实 pending/恢复材料保留。
+
+## 安装与原生退出回归 · 2026-11-08
+
+用户说明此前是退出后的进程残留。之前仅凭 POWERPNT.EXE 存在就称程序仍正常打开，是不准确的判断；现已在 AGENTS.md 中明确禁止把 PID 等同于活动窗口/文档，安装检查忽略僵尸进程，并将其他存活 PID 表述为尚未释放、可能是退出残留。不能在这些进程仍可能回写注册表时强行替换程序，也不能把测试强制清理记作自然退出。原残留进程已结束，本轮没有现场 dump，无法追溯其确切原因。
+
+已补齐 cpak relay 空闲后的事件唤醒：DLL 在连接失败时创建自身私有目录中的空 `relay.request` 目录，每 5 秒最多一次；新 `--sandbox-wakeup` 安装选项为指定 prefix 写入 systemd 用户 path/service 单元。host helper 消费目录，核对既有 token/port/prefix，按实际目录去重 `steamuser` 等别名，确定同 prefix 的唯一网络 namespace 后转接单一端口。服务与 relay 一起按需退出，仅由用户管理器保留路径监听；不依赖启动器常驻监视，也不需要修改主机启动器。listener 使用 SO_REUSEADDR，允许空闲退出后重新绑定；连接重建成功后清除旧错误状态。有效凭据已存在时安装器不再重写设置文件，避免改变用户格式或额外字段。单元生成、目录别名、符号链接拒绝、设置保全及僵尸检测均有回归。
+
+实际结果：
+
+- Python **68 项**、Node **24 项**通过。MinGW GCC 13.2 编译最终 DLL，SHA-256 `28f55e55e4b6c426636122e0b94d192e639b8eb348e0c452b1c58f9ac79616ff`。
+- 最终 DLL 的真实 Word：在完整独立 prefix、认证私有 Xvfb、独立 user/net/mount namespace 和临时模拟挂载中运行；初次无端口连接失败触发真实 systemd path activation，STA 自动恢复、干净文档不改写、本地完整暂存、Save now、原生 Save 后继续编辑、8 秒定时提交、暂停/恢复、最终关闭内容均通过。零文档后调用 Quit，确认 Word 进程自行退出，再清理 Wine 后台服务。
+- 最终 DLL 的真实 PowerPoint：同样使用真实 path activation 和 `/run/cpak/grants/...` bind 路径；空白应用实等 35 秒，核验 relay MainPID=0、没有文档会话，再由同一应用创建文档，连接无需重跑启动器即可恢复。完整暂存/保存/定时/暂停/最终内容通过。最后确认零文档，释放驱动程序自己的 COM 引用，在私有 Wine 桌面中按进程映像枚举唯一主窗口并投递 WM_CLOSE（该版本未暴露 Application.HWND）；没有调用 Quit，PowerPoint 进程在强制测试清理前自行退出。不能把它等同于已验证日常 Wayland 鼠标关窗的全部路径。
+- Excel 在当前复制 profile 中发生 COM Add/早期编辑断连（800706ba/800706be）；使用正式发布的未改动 0.3.1 DLL 和原始测试驱动做对照，也在 SaveAs 后、本地暂存确认前断连。此项没有通过，不归因为本补丁，也不声称已修复。此前版本的三应用成功记录不能替代本轮 Excel 的实际失败。
+
+各次测试仅操作私有模拟文档，原始 Wine 三份注册表摘要在成功的最终 Word/PowerPoint 测试前后保持一致；专用 prefix、Xvfb、namespace、临时 path/service 单元和进程组均清理。没有真实 TwoDrive 保存或云端同步测试。
+
+已在停止的 Microsoft365-Trio 中安装上述最终 DLL，并同步更新 Linux runtime、已安装 ONLYOFFICE 两种布局中的 plugin.js 和后台按需单元；主机 Office 启动器未改动。配置凭据保持，settings.json 恢复并核验为安装前的原始字节，user.reg/userdef.reg 字节不变；system.reg 仅经安装器的八个自有 COM 段补丁流程更新，未保留完整旧 system.reg 做外部内容逐字节对照，不作该项额外声明。待恢复目录中原有 **2 个文件逐字节摘要不变**。保留一个按内容去重的小范围程序回退目录，旧 DLL 仅保存在 prefix 的 `.previous` 文件。
+
+安装后未启动日常编辑器，没有为验收访问真实保存接口或触发 pending 恢复；HTTP bridge 与 namespace relay 均为 inactive、MainPID=0，只有原 socket 和新 path 处于监听/等待。本轮补丁仍未发布，正式 v0.3.1 制品和标签不变。临时工具链/下载、旧版对照程序、探针、测试日志/profile/文档和 bytecode 已清理，专用测试进程无残留；真实待同步与恢复数据保留。
+
+## 自动加载缺失补正 · 2026-11-08
+
+用户再次截图显示 TwoDrive 选项卡缺失。只读排查发现 DLL 仍为已安装的最终版本，但普通 HKLM PowerPoint Addins 的 LoadBehavior=3 之外，Click-to-Run 虚拟 Machine 注册表中同一加载项另有 LoadBehavior=2。此前真实驱动打印过 CONNECTED 0，随后通过 COMAddIn.Connect=true 强制连接后才验证保存；这证明保存功能，不证明自动加载或正常启动时选项卡出现。前次测试把这一缺口掩盖，现已取消集合 Update 和强制连接，启动即未连接就必须失败。[Microsoft 的 LoadBehavior 值说明](https://learn.microsoft.com/en-us/visualstudio/vsto/registry-entries-for-vsto-add-ins?view=visualstudio#loadbehavior-values)可供对照；本项目仍为原生 COM DLL，不依赖 VSTO/CLR。
+
+安装器现在同时维护自身三个 Click-to-Run 虚拟 Machine Addins 段，总共 11 个自有注册段；匹配 Windows 注册表段时不区分大小写，避免同一键不同大小写留下旧覆盖值。新增回归以已有的 C2R=2 覆盖验证修复为 3，并确认其他加载项的 2 保持原样。Python 共 69 项通过。
+
+最终 DLL 未改动。独立 prefix、私有认证 Xvfb 和隔离 net/mount namespace 中的真实 PowerPoint 启动直接返回 CONNECTED -1；没有调用 Connect=true，也没有刷新集合。自动会话、暂存、Save now、定时、暂停/恢复、最后内容和原生 WM_CLOSE 自然退出均通过；Wine 后台退出写回注册表后，C2R 的启动标志仍为 3。原始三份 Wine 注册表摘要在测试前后不变。
+
+另一次尝试在私有 X11 显示中提前展示文档以抓取 ribbon 时出现既有 COM 800706ba，画面为空黑；该截图已删除，不作为可视选项卡验证通过的证据。正常 Wayland 界面的选项卡仍需用户重新打开应用确认，不能用无窗口 COM 成功替代可视验证。
+
+确认日常 bottle 已无 Wine/Office 进程后，只修补日常 system.reg 中这三个自有 C2R 段；其余注册段内容（忽略末尾分隔换行）核对一致。user.reg、userdef.reg、设置、bridge 凭据、当前 DLL/previous DLL 及所有 pending 文件摘要保持不变；没有重装 DLL、改其他加载项、信任设置或启动日常编辑器。原有必要程序回退中另保留这三个段的旧值。候选包和验证摘要同步更新；临时工具链、测试副本、日志、空黑截图及专用进程在收尾清理。
+
+## WinHTTP 12029：嵌套 user namespace 补正 · 2026-11-09
+
+用户截图中的 TwoDrive 选项卡已经出现，但显示保存服务连接失败。只读查看真实 systemd 日志，按需 relay 多次退出于 `nsenter: reassociate to namespace 'ns/net' failed: Operation not permitted`；主机 bridge socket 仍正常监听。真实 Word 的 user namespace 为 `user:[4026533196]`，继承的 net namespace 为 `net:[4026532687]`，通过 `NS_GET_USERNS` 查询到该网络实际归属 `user:[4026532679]`。先进入 Word 的嵌套 user namespace 后没有权限进入上层所有的网络，解释了端口未创建及 WinHTTP 12029。此前独立 namespace 与真实 Office 测试只覆盖 user/net 同层结构，未覆盖实际 cpak exec 的嵌套关系；前次成功不能证明这条日常连接路径通过。
+
+修复只改 Linux `namespace_listener`：从已验证归属的目标进程打开 net namespace，使用 `NS_GET_USERNS` 获得真正所有者的描述符，通过继承的 `/proc/self/fd/...` 参数交给 nsenter。两项描述符在使用期间保持打开，使用前后继续验证目标身份；不扫描猜测上层进程、不需要 root、不更改 cpak 隔离策略，也不改 DLL、Office 注册表或保存规则。内核行为依据 [NS_GET_USERNS](https://man7.org/linux/man-pages/man2/NS_GET_USERNS.2const.html) 和 [setns 权限要求](https://man7.org/linux/man-pages/man2/setns.2.html)。
+
+独立回归改为先建立外层 user/net namespace，再由内层 user namespace 模拟 Office：核对两层 user 不同、net 的所有者确为外层，确认旧 nsenter 命令实际失败；修复后的 relay 完成认证拒绝/接受、模拟 DOCX 副本保存、重复 relay 复用和进程退出清理。7 项 namespace 测试及全套 69 项 Python 测试通过。真实 Office 集成脚本也已补充同样的嵌套启动及所有权断言，本轮未运行该脚本。另以现有 cpak `application-runtime` 进程为目标，只执行 `/bin/true` 比较：旧方式退出码 1，实际网络所有者描述符方式退出码 0；未建立任何 socket 或访问 Office/文档。
+
+所有保存写入仅使用临时模拟文档，没有真实 TwoDrive 保存或云端上传验证。本轮没有启动任何 Office 编辑器。
+
+等待另一个“修复悬停 Reflect 样式时崩溃”Codex 任务完成后，原子更新本机 Linux runtime 中的 `wine_namespace.py`，摘要为 `5e3d951a8b159037173267b6c29187415de4777b3aaab25ca076ceaa94b9bea5`；保留该单文件的必要回退。安装前后三份 Office 注册表、设置、bridge.ini、DLL/previous DLL 以及现有 2 个 pending 文件逐字节摘要一致。仅重置自有 relay 的失败状态，没有重启主机 bridge 或修改 Office 启动器。
+
+用**已安装模块**在现有 cpak 容器中创建独立随机临时端口，将随机 nonce 转发至独立主机测试 socket 并原样返回；未使用真实 bridge 端口或访问保存接口。该 relay 在测试后自行空闲退出，容器继续运行，临时锁和目录删除。收尾时正式 bridge 和 relay 均为 inactive/MainPID=0，原 socket 为 listening、path 为 waiting。当前未发布候选包同步更新，正式 v0.3.1 制品保持原样；专用测试进程、缓存、bytecode、临时脚本/日志均无保留。不能据此声称已验证日常 Word 保存或真实云端同步。
+
+
+## 2026-11-09：保留 Wine Office 的原始关闭请求
+
+用户报告 Word 编辑后无法退出；私有 Wayland 样本在旧 DLL 下复现：Word、Excel、PowerPoint 关闭文档后均留下零文档、零文档窗口的空白应用框架。第二次关框架才退出。旧版统一取消 BeforeClose，延后调用 Document/Workbook/Presentation.Close，丢失了原先退出应用的请求。
+
+Word、PowerPoint 可在 BeforeClose 中完成快照和原生保存，现保留原始请求；失败仍取消关闭并保留文档。Excel 仍需延后保存，通过同线程窗口 subclass 记录 WM_CLOSE/SC_CLOSE，保存成功后重试同一框架；COM 文档关闭保留文档关闭路径，不隐式 Quit。卸载会移除 subclass；回调期间保留对象生命期。
+
+新增 `tests/wine_integration.py --host Word --first-quit`：首次 Quit 前产生最后修改，释放测试引用后要求自然退出，不补发第二次关闭；检查最终文件内容及无残留待同步版本。旧 DLL 对照未退出，最终 DLL 通过。69 项 Python 回归通过。
+
+另在私有 scale-2 Wayland/cpak、mock mount 上验证三款原生右上角 X：最终文字确实保存、窗口与进程正常退出、mock pending 清空。记录在 `/home/lumia/software/windows/verification/office-v10`；字体/绘图修复属于该目录的 Wine 运行层，保持本插件现有桥接协议。未对真实 TwoDrive 或用户工作文件执行保存测试。
+
+附加 X11 Excel 自动化检查在旧 v9/旧 DLL 和候选环境都于关闭前的编辑/快照阶段断开 RPC，未用其宣称 Excel X11 通过；正常部署和本次实际验收使用原生 Wayland。Excel 纯 COM Application.Quit 且未产生原生框架关闭消息的情形未扩展为自动退出策略。
+
+## WordOpenXML 80020009：失败保护与诊断 · 2026-11-11
+
+用户截图显示 `COM WordOpenXML error 80020009`，随后报告无响应、无法关闭，后来说明已能正常关闭。截图中的错误发生在 Word 导出完整 Flat OPC 阶段，尚未将该次快照发往 bridge。`80020009` 是外层 `DISP_E_EXCEPTION`，旧包装丢弃了 Office 的 EXCEPINFO 描述/内部错误码，不能单凭它判定文档内容、兼容模式或 Wine 的具体缺陷。源码另确认两项失败处理问题：失败不更新时间戳，定时器会每秒重试导出；BeforeClose 中同一导出再次失败会取消关闭。它们可以阻碍关闭，但没有完整的 Windows 主线程回溯证明本次无响应的确切原因。只读调试后进程未保留 tracer；未终止日常 Office，也未复制活动 profile。
+
+修订保留 EXCEPINFO 的 Unicode 描述、Office scode/wCode，并支持 deferred fill-in；返回明确 Word 序列化异常时暂停该文档的自动保存，保留原生 dirty 标记、已有本地版本及其版本号。关闭请求中的同类失败保留 Word 自身的保存/放弃/取消选择，不再强制取消；其他保存失败继续保守拦截。Word 导出期间禁止自动警告并恢复原值；普通 busy/RPC 失败仍可重试，失败采样也遵守至少五秒间隔。没有改用只导出正文的降级路径，也没有通过切换真实文档路径来另存为。此保护只处理已返回的异常，无法中止一个永不返回的同步 COM 调用，不能据此宣称所有卡死已经修复。
+
+本轮验证：
+
+- Python **69 项**、Node **24 项**通过；MinGW GCC 13.2 x64 构建通过。新增原生 `tests/wine/AddInSmoke.cpp` 在独立临时 Wine prefix、无 DISPLAY/Wayland/会话 DBus、禁用图形驱动的环境中运行，无 Office 应用。实际复用 COM 包装及插件 process/event 代码，验证 deferred Unicode 异常和内部码、导出失败暂停、旧暂存版本不变、未调用原生 Save/未清 dirty、暂停后不再导出、首次 BeforeClose 失败不改取消标记、已有取消保持、瞬时拒绝不永久暂停及失败采样限频。
+- 最终 DLL 在 Soda `11.0-37-office-v12`、Microsoft 365 Word 16.0 的完整独立 prefix、认证私有 Xvfb、临时模拟挂载中分别验证兼容模式 **12（Word 2007）**与 **14（Word 2010）**。17 页合成文档包含中文、页眉、页脚及浮动文本框；本地完整快照保留非正文内容，挂载源在暂存期间不变，原生 Save now、随后手动 Save、定时提交、暂停/恢复及带最终修改的首次 Quit 均通过。Word 在测试强制清理前自然退出，原始三份注册表摘要不变，专用 profile/文档/进程组已清理。
+- 合成兼容文档没有复现原始 `WordOpenXML` 错误，因此不能将“兼容模式”定为根因，也不能宣称原始文档导出已修复。没有真实 TwoDrive 保存或云端同步测试；其他 Office 应用没有因本轮 Word 修订重新实测。
+
+确认日常 Microsoft365-Trio 已无 Wine/Office 进程后，已原子更新其自有 DLL；SHA-256 为 `40b9bc43d8daa2530a577e413bb11c84b5323da0a26493d92fd0f488245c51aa`。仅替换 DLL 和其 `.previous` 回退文件，回退为安装前 `4e70571c5a2c0f8e04c725d6f095f7a4e7a41106ca4c845f1ff95f113fee9c76`。三份注册表、bridge.ini、settings.json 与 **4 个 pending 文件**合计 9 个受保护文件摘要在安装前后完全一致，没有改 Wine runner、Office 配置、桥接协议或其他任务的测试环境，没有启动日常编辑器。未读取原始工作文档；本轮只交付失败保护和诊断，原始文档的具体导出故障仍待获准使用临时副本后定位。更新同一个未发布候选包，正式 v0.3.1 制品和标签保持不变。
+
+收尾已删除本轮工具链/下载、原生探针二进制、临时脚本/日志、全部测试 prefix/模拟文档及本轮 bytecode；核验没有本轮专用 Wine/Office 进程残留。保留源代码、当前候选包、正式发布集及必要的单份 DLL 回退，所有真实 pending/恢复数据保持原样。
+
+### 获准使用文档副本后的续检 · 2026-11-11
+
+用户随后明确允许只读复制出错的 DOCX。用原授权路径的 inode 确认实际文件位置，读取稳定快照至 0700 私有临时目录；另对同名较早版本作只读对照。当前文件的 mtime 为 14:15:40（Asia/Shanghai），晚于截图，无法从它还原故障当时未保存的内存状态。测试从未在真实 TwoDrive 或原件上打开编辑器/执行 Save，原件和较早版本的内容摘要在收尾复核。
+
+为复用此流程，集成驱动新增 `--word-document`：只把输入复制至私有模拟挂载，要求 `--host Word --sandbox`，禁用宏及打开时链接更新，保留输入文件名；可选 `--word-visible` 仅用于已验证的私有显示。测试标记文件改用 CreateFileW/WriteFile，支持中文目录；新增严格的已有正文/脚注/尾注文字及图片原始字节比较，比较失败时只记录位置和长度，不记录正文。
+
+实际结果与边界：
+
+- 当前保存版本和同名较早版本在私有 Xvfb、独立 user/net/mount namespace 中均完成 WordOpenXML、修改暂存、Save now、定时保存、暂停/恢复、首次 Quit 和自然退出，没有复现 `80020009`。这两次早期测试只核对新增标记和保存流程，**不能据此声称整篇原有文字逐字一致**。
+- 使用修订前 DLL，在私有原生 Wayland、scale 2、与原路径相同长度/中文名称的模拟 grant 路径下，WordOpenXML 和本地暂存同样成功，8 张图片原始字节保持；但新增的严格文字比较发现一处中文字发生变化，因此该文档的完整保真检查失败，没有把它记为整套通过。截图中的 WordOpenXML 异常仍未复现。
+- 进一步在打开副本前断开插件，直接读取 Word 的 Content.Text 并调用 WordOpenXML、原生 Save，发现差异在第一次 WordOpenXML 调用前的内存模型中已存在。该控制实际完成零文档后 Quit 和自然退出；外层普通自动加载断言因控制有意断开插件而不适用，未将整套 harness 记为通过。
+- 最后在真正的 Bottles cpak 容器中重新建立完全独立的 prefix 和私有 GPU Wayland compositor，**打开前从该私有注册表移除本插件，并验证 COMAddIns 中不存在本插件**。核验实际 Office 的私有 prefix、DISPLAY 缺失、私有 Wayland socket、XDG 配置目录及独立网络 namespace。无插件时，同一读取差异仍在首次导出前出现；WordOpenXML、临时副本上的原生 Save、文档关闭及零文档后 Quit 均完成，确认编辑器自行退出，再停止自有容器。该结果将此字符差异定位到原生读取路径，不能归因于插件的 Flat OPC 转换；**它与原始 80020009 的关系尚未建立，不能作为原报错已定位或已修复的证据**。
+- 中文长路径首次探针因驱动的窄字符 ready 文件路径中止，修正为宽字符 API 后继续；另一个 X11 可视对照在 Visible 阶段返回既有的 RPC `800706be`，不计为 WordOpenXML 复现或成功。后续使用隔离的原生 Wayland。没有通过放宽文字比较掩盖原生读取差异。
+
+本轮没有进一步修改或替换生产 DLL、Wine runner 或 Office 配置，只扩充复现工具和验证记录。原始保存异常仍需故障发生时的详细 EXCEPINFO/交互状态才能继续归因，既有失败保护继续生效。Python 69 项、Node 24 项及更新后的 x64 测试驱动编译通过；真实用户文件的副本不随候选包交付。
+
+收尾核验两份原件内容摘要均未变化，三份原始注册表、DLL/previous DLL、bridge.ini、settings.json 和现有 pending 共 **11 个受保护文件**逐字节摘要保持。所有本轮专用 Office/Wine、私有 compositor 和临时容器均已结束，没有残留测试进程；原件、已有恢复内容和其他任务的环境不作清理。本轮输入副本、导出的 XML/文字/办公文件、copied profile、测试日志、一次性探针/适配脚本、工具链和下载均删除，仅更新当前候选包中的测试工具及简要审计记录。
+
+### 字符读取问题的定位、修复与部署 · 2026-11-11
+
+用户要求继续修复，仍明确只测试临时副本、不改原件。纯 IXmlReader 的公开接口已独立复现，不需要 Word 或插件：Wine 的 UTF-8 尾部扫描没有正确识别 continuation byte，保留未完整字符时又从错误的原始缓冲区位置拷贝数据，导致分块边界处的多字节字符变成其他 ASCII 字符及 U+FFFD。与 [Wine MR12399 的公开提案](https://list.winehq.org/hyperkitty/list/wine-gitlab%40list.winehq.org/thread/C5AMKGAILZI2QG62LTLYZX4OWP7ORWDZ/)吻合；本地回移 Andrew Manchinsky 提案的 reader.c 修订，包含 UTF-16 转换后的原始缓冲区消费。没有声称该提案已被上游接受。
+
+维护源及归属明确的补丁位于 `/home/lumia/software/windows/tools/office-input/patches/0017-xmllite-fragmented-unicode.patch`，已核验从 Wine 基线可逐字节重建修改后的 reader.c。独立新运行器 `soda-11.0-37-office-v14` 相对 v13 **仅改变 x64 xmllite.dll**，SHA-256 `107d5f2a341665714cc41603607ff1ddf88b35abe7c04fd928f95adb7806f8ca`；v13 的旧模块为 `9c5da9e5b996adb32ff172fdcd3e72aaf9a790d30708723d9f750c3cb137f162`，保留用于针对性回退。其他既有显示/字体/关闭修复的运行层模块没有变化。
+
+实际验证：
+
+- 公开 API 分块不变性测试共 **140 组**：覆盖 2/3/4 字节 UTF-8、不同文本长度和流片段大小、UTF-8 BOM/无 BOM 及 UTF-16LE。旧 v13 **10 组失败**，v14 **全部通过**。用独立完整 Unicode 转换生成预期值，不以解析器内部缓冲区布局充当预期结果。
+- Wine 原有 reader **2145**、writer **2746** 项检查均无失败；原有 **15/44 个 todo** 仍如实保留，不宣称这些未实现能力已通过。
+- 真正 Bottles cpak 内，对 v13/v14 使用同一份授权 DOCX 快照和合成中/拉丁文、扩展区汉字及 emoji 样本做成对验证。都在独立 profile、私有 scale-2 GPU Wayland、独立网络 namespace 中运行；打开前移除私有插件注册，核验插件不存在，并核对真实 Office 进程环境及实际加载的 xmllite 路径。
+- v13 在文本接口、完整 Flat OPC 导出和**真实追加修改后的原生 Save** 均出现字符变化。v14 的两份样本在读取前后、导出和保存后，所有既有正文/脚注/尾注文字均与预期完全一致；授权样本的 **8 张图片原始字节**完整保持。追加的公开 Unicode 标记确实进入原生文件，Saved 标记由 dirty 恢复，不能以未修改文件上的空 Save 冒充保存回归。
+- Word.Content.Text 会把内嵌图片表示为占位内容，直接与 OOXML 的 w:t 拼接结果比较会产生额外差异。测试按 InlineShape.Range 的真实位置及内容精确排除占位范围，再作文本比较；独立的 XML 原有文字及图片字节比较未放宽。最终两份样本的各项检查全部通过。每份文档关闭后 Documents.Count=0，随后 Quit，确认 Word 自行退出，才停止测试容器和后台服务。
+
+确认日常 bottle 无未释放进程后，已只把 `bottle.yml` 的 Runner 和两份 `office-display.json` 的 runner 字段从 v13 切到 v14。没有启动日常编辑器，没有改原文档、三份注册表、插件 DLL/previous、bridge.ini、settings.json 或 pending；11 个受保护文件摘要在部署前后保持，原件内容摘要同样未变。简要运行时/测试/部署审计在 `/home/lumia/software/windows/config/office-v14-xml-runtime.json`。需要回退时，在 Office 退出后仅把这三个字段改回 v13，不恢复整个 profile 或文档。
+
+该修复解决的是已复现的 Unicode 读取/保存问题。原始 `80020009` 异常与它是否同因仍未建立证据；未对 x86、其他 Office 应用、真实 TwoDrive 写入或云端同步作本轮验证，不扩大兼容性声明。
+
+
+## Soda Office 保存期间继续编辑 · 2026-11-19
+
+本地候选使用 Microsoft 365 Office 16.0 和 Soda 11.0-37-office-v15。在复制的 bottle、私有显示和本地模拟挂载目录中运行。程序包的 DLL SHA-256 为 `0c5682c88bcf5500d88db4eb2b78efcbbbe60516772781a298b1c61dbefd7cb9`。
+
+- Word 使用 17 页兼容模式 14 的合成 DOCX，包含中文正文、页眉页脚、浮动文本框和表格。保存服务成功暂存第一版后扣住回执，修改表格的 COM 调用在 10 毫秒内返回。第一版快照保留旧表格，最终 DOCX 保留新表格和关闭前的正文修改。手动 Save 后立即再编辑、定时保存及首次 Quit 的内容断言通过。退出后整体测试因原 bottle 注册表同期变化而报错；检查时原 bottle 有活动进程。因此这次不计为完整环境校验通过。
+- Excel 使用两张以上工作表、2,048 个公式、单元格编辑、原生保存和关闭。Wayland 独立启动的候选完成恢复快照、定时和最终文件检查，实际公式与最后的两个修改均存在，扣住快照回执时单元格编辑为 12 毫秒。此轮早于最终 DLL 增加文件句柄修改时间和大小复核。最终 DLL 的连续多宿主测试中，第二个应用 Excel 在创建 COM 应用时报告 80004002；随后原 bottle 已有活动进程，独立重跑未启动。未将此前候选的结果计入最终 DLL 全套通过。
+- PowerPoint 使用约 108 MiB 的合成 PPTX，含 9 张独立生成的图片，多页文本及表格。七次编辑包括修改文本、添加并修改另一张表格及两次替换大图。每次原生 Save 后立刻继续修改标题。七次从调用原生 Save 到下一次 COM 编辑返回为 475、525、505、461、669、552、460 毫秒，中位数 505 毫秒。另一次小文稿测试在扣住快照回执时，表格编辑在 14 毫秒完成。最终文件通过 ZIP CRC、超过 100 MiB、最后的图片对象名、表格内容和关闭前正文校验，恢复队列已清空，宿主自行退出。上述七次测量含同步自动化调用耗时。它们不能用来证明键盘输入的实际绘制延迟。
+- 私有 Wayland GPU 显示上的按键到字形测试遇到 PowerPoint 的登录窗口，文本框未收到标定输入，未产生有效的上屏延迟样本。候选没有截获用户的 Ctrl+S 或更改登录状态。宏、加密、超过既有 128 MiB 传输上限的快照、真实云端和每日 GNOME 前台时延不在本轮覆盖范围内。
+- Python 单元测试 113 项通过。独立 Wine COM 故障注入检查涵盖失败快照保留、关闭、持续输入的采样上限、慢导出的间隔和重试退避。数据传输、摘要和确认在工作线程完成；Office 的原生导出、Save 和必须确认最后一版的关闭仍可能阻塞。
+
+复验入口为 `tests/wine_integration.py --mixed-edits`。使用 `--large-deck --host PowerPoint` 复验大包，用 `--host Word --word-compatibility 14 --first-quit` 复验复杂 Word 文档。Soda 的原生 Wayland 环境可指定 `--wayland-tools` 指向包含 `scripts/run-headless-wayland.sh` 的测试工具目录。已授权且能接受键盘输入的独立 PowerPoint 窗口可额外使用 `--measure-input`；该测试检查像素、每次保存的不同标记以及最后文档中的文字。硬件、测试环境和文件内容会影响结果。
+
+## Soda PowerPoint 实际 147 页课件的后台保存与分片上传 · 2026-11-19
+
+从现有本地缓存复制 83,109,780 字节的 PPTX，包含 147 页和 201 个媒体条目。原件有独立的生产上传任务。以下编辑仅发生在副本上。使用上一节所列摘要的预览包 DLL 及随包 bridge，运行 Microsoft 365 PowerPoint 16.0、Soda v15、复制的 bottle、独立 Weston 显示、挂载检查开启。测试使用低优先级，与桌面共享主机。两轮均通过插件自动连接、正常宿主退出及源 bottle 注册表校验。
+
+| PowerPoint 与同一份课件 | 默认 180 秒发布周期 | 加速复测，15 秒发布周期 |
+| --- | ---: | ---: |
+| 从首批对象修改到观察到已持久化的第一版恢复快照 | 1.995 秒 | 2.245 秒 |
+| 扣住快照回执后，再改首页文字并在末页建表、写单元格 | 35 毫秒 | 39 毫秒 |
+| 从首批修改到观察到原生定时保存完成 | 187.503 秒 | 21.733 秒 |
+| 等待定时保存期间，约每 40 毫秒查询 Office 状态的最长间隔 | 1.252 秒 | 1.073 秒 |
+| 三次原生保存至下一次表格编辑完成（单次） | 1.658、1.647、1.586 秒 | 1.578、1.781、1.707 秒 |
+| 最后一次改字后关闭，直到文稿数归零 | 3.786 秒 | 3.978 秒 |
+| 立即在同一 PowerPoint 进程重开至读回最后标记 | 0.967 秒 | 0.904 秒 |
+
+第一份快照通过 ZIP CRC，含首版标记，当时挂载文件仍与输入摘要一致。定时保存后的挂载文件含第二次编辑的首页文字和末页表格。扣住旧上传第一片的回执，接着手动保存三次，其间插入、替换图片并立即修改表格。最后再次改字并正常关闭。两轮重开都通过 147 页、最终文本、表格和图片对象断言。最终文件 ZIP CRC 通过，原有 201 个媒体条目的内容摘要全部保留。计时来自 Office COM 和文件屏障；没有键盘到像素的延迟样本或物理断电测试。
+
+### 挂载和接收端
+
+- 安装的正式 0.2.29 daemon 在独立 FUSE 挂载和内存模拟后端上，另做两轮连续同目录临时文件替换。每轮将缓存释放至 online_only，再从模拟后端读回，整份 SHA-256 均匹配第二版。一条并发临时上传报本地条目消失，加做的一轮在 67 秒后的刷新中只剩正文，待删除和元数据队列均为零。
+- 两轮 Office 联测使用 v0.2.29-1 的 release 优化构建，仅在临时源码树将 Graph 服务地址指向环回 HTTP，使用虚构凭据和私有数据目录。接收端核对每片起止偏移、长度和顺序，从分片重组独立文件。首轮接收器对短临时文件 PUT 返回 404，遗留 5 条待删除记录；该轮仅用于计时、分片正文和摘要校验。第二轮补全小文件写入、改名、删除及增量元数据响应，两类持久队列最终均为空，按目标名称查询的接收文件、挂载和合并后的平坦缓存摘要一致。释放隔离缓存后，从该 HTTP 接收端重新下载也得到同一摘要。本地接收器只覆盖本实验涉及的 Graph 行为。
+- 第二轮收齐 10 个完整分片会话、80 个被接受的分片，共 794.6 MiB。8 个会话确认时使用 Office 临时文件名，合计 635.8 MiB。旧上传被暂停时继续修改，旧版整份接收摘要与定时保存时独立记录的摘要相符。最后一次正文会话在第二片首次请求时收到测试注入的 503，查询偏移并重试后补齐，最终正文与重开时的最新版一致。恢复旧上传回执后约 35.2 秒取得这次最终正文回执。这里的传输时长包含人为控制的回执和后台扫描等待，不能预测公网耗时。
+
+### 资源和重复恢复写入
+
+约每 120 毫秒从 Linux 采样，RSS 为单进程驻留内存；缓存大小按实际分配块统计、硬链接只计一次。写入量来自进程 write_bytes，与存储设备的物理写入存在差异。CPU 百分比按单核 100% 计，峰值使用约 1 秒的窗口。
+
+| 从第一笔编辑至重开验证完成附近 | 180 秒轮 | 15 秒轮 |
+| --- | ---: | ---: |
+| PowerPoint / bridge / TwoDrive RSS 峰值（MiB） | 1095 / 196 / 53 | 1074 / 157 / 73 |
+| PowerPoint / bridge / TwoDrive CPU 峰值 | 99% / 27% / 52% | 100% / 29% / 57% |
+| TwoDrive 缓存较已预热课件的额外峰值 | 238.5 MiB | 159.3 MiB |
+| 插件恢复目录峰值 | 158.5 MiB | 158.5 MiB |
+
+默认周期中，完成第二批编辑后只查询 Saved 状态。连续 150 秒内，PowerPoint 写入约 1111 MiB，bridge 写入约 1110 MiB，TwoDrive 的写入增量为零。连续六份恢复快照有 586 个 ZIP 条目，幻灯片和媒体摘要相同，变化的条目集中在 docProps/app.xml 与 docProps/core.xml；抽查一对属性观察到 modified 和 revision 值变化。较晚的连续快照间隔约 10 秒。插件在原生 Saved 仍为假时再次调用 SaveCopyAs；bridge 的内容摘要保留 revision 和扩展属性差异，可以为同一可见内容再次完整写盘。新增 test_powerpoint_idle_export_keeps_the_existing_recovery_blob 使用独立缓存和合成 PPTX，将同一页面仅改变导出修订号后再次暂存，已确认断言在当前实现失败。113 项 Python 测试通过，此用例作为 1 项预期失败记录。代码尚未修复。
+
+第二轮最终确认后约 60 秒，后台范围映射清理完毕，平坦缓存摘要正确。在确认到清理之间持续轮换打开、读取 7 个固定偏移的 4 KiB 并关闭，521 个样本内容一致，耗时中位数 13.6 毫秒，P95 为 21.1 毫秒，最长 65.6 毫秒。该窗口内挂载进程约用 2.94 CPU 秒、写入 73.1 MiB，包含并行读取和后台维护。仓库上传会话回归 9 项通过，范围写入、冻结与合并回归 6 项通过，另有 1 项计时基准默认忽略。测试包与默认安装未变更，未发布新版本，未对真实 OneDrive 写入。
+
+## PowerPoint 0.3.2 候选的合并上传与空闲消耗 · 2026-11-19
+
+在隔离 Soda PowerPoint、独立 FUSE 和环回 Graph 协议接收端，使用相同 147 页缓存副本及默认 180 秒。第一次恢复快照耗时 2.74 秒，扣住回执时二次编辑耗时 35 毫秒。定时原生保存 186.09 秒。三次手动保存加下次编辑 1.54–1.61 秒，关闭 4.31 秒，立即重开并核对文字、表格及图片 0.89 秒。
+
+连续 150 秒中，PowerPoint 和桥接的写入从 1111、1110 MiB 降为 317.8、79.3 MiB，包括第二批有效编辑的恢复版本。两者消耗 7.04 和 1.34 CPU 秒。全程一秒窗口内 PowerPoint 峰值 101% 单核；其 RSS 峰值 1009 MiB，桥接 130 MiB，挂载进程 33 MiB。存在单次原生序列化停顿，无持续单核忙等的证据。模拟接收端收到两份正文，临时文件内容上传为零。首次候选同时暴露了旧版本快速轮换时远端正文名短暂消失的问题，由 TwoDrive 端继续处理。
+
+这些数值来自 Windows 加载项、宿主和 Linux 进程采样。真实 OneDrive 网络超时、SSD 物理写放大和用户前台按键显示延迟未在此测试中测量。
+
+审查发现原生文件已写入、桥接确认暂时失败时，旧 worker 会丢弃待确认句柄。修正后遇到传输错误会保留最新的已固定文件、摘要及令牌，并沿用退避；同一版本的成功回执可重放，目标指纹变化或版本前进会拒绝旧确认。增加丢回复的 COM worker 与桥接回归。
+
+最终组合使用 15 秒加速发布，在原生确认提交前及成功后各丢一次响应。适配器自动重试成功后才放行后续编辑。第一个本地恢复包 2.44 秒，回执扣住时二次修改 42 毫秒。三次原生保存及下一次修改 1.61–1.66 秒，最后关闭 4.33 秒，重开且验证全部标记 1.06 秒。接收端只有两次大文件上传，均为最初的正式文件身份，无远端改名、删除或临时内容上传。文件大小分别为 83,110,634 和 83,465,915 字节，合计 158.9 MiB；此外接收器故意丢弃一个 10 MiB 分片并返回 503，随后续传成功。重开约 10 秒后收到最终回执。释放隔离缓存再下载，最终 SHA-256 相同，201 个原始媒体成员逐一匹配，元数据和删除队列均为零。快速编辑轮峰值 RSS 依次为 PowerPoint 985、桥接 130、daemon 23 MiB。分块期间的 90 次 4 KiB 读取 P95 为 18.3 毫秒，最大 18.8 毫秒。相关主程序 PR 为 LumiaBlack51/twodrive#78。

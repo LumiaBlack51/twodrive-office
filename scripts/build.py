@@ -53,7 +53,7 @@ def build():
         wine = dist / f"twodrive-autosave-{__version__}-wine-x64.zip"
         with zipfile.ZipFile(wine, "w", zipfile.ZIP_DEFLATED) as archive:
             archive.write(dll, "wine/TwoDrive.Wine.dll")
-            for name in ("LICENSE", "README.md", "docs/wine.md", "docs/verification.md", "docs/releases/v0.3.1.md", "scripts/install_wine.py", "scripts/bridge_install.py"):
+            for name in ("LICENSE", "README.md", "docs/wine.md", "docs/verification.md", "docs/releases/v0.3.2.md", "scripts/install_wine.py", "scripts/bridge_install.py"):
                 archive.write(ROOT / name, name)
             for path in sorted((ROOT / "twodrive_office").glob("*.py")):
                 archive.write(path, str(path.relative_to(ROOT)))
