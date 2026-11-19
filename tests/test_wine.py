@@ -80,7 +80,7 @@ class WineQueueTests(unittest.TestCase):
         self.assertFalse(self.bridge.local_saves.pending())
         self.assertEqual(self.bridge.sessions[self.key].local.expected, fingerprint(self.source))
 
-    def test_native_digest_rejects_stale_wrong_and_replayed_confirmations(self):
+    def test_native_confirmation_can_retry_before_and_after_commit_without_another_save(self):
         self.stage()
         token = prepare_native(self.bridge, self.key)['native_token']
         self.source.write_bytes(self.content)
@@ -91,6 +91,10 @@ class WineQueueTests(unittest.TestCase):
             self.assertTrue(self.bridge.local_saves.pending())
         complete_native_digest(self.bridge, self.key, digest, token)
         self.assertFalse(self.bridge.local_saves.pending())
+        # A lost success reply permits the identical confirmation, without
+        # a second Save or a second mutation of the recovery queue.
+        complete_native_digest(self.bridge, self.key, digest, token)
+        self.source.write_bytes(document('outside the original save'))
         with self.assertRaises(SaveError):
             complete_native_digest(self.bridge, self.key, digest, token)
 

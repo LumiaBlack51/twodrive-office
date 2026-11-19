@@ -103,6 +103,20 @@ struct AddInSmoke {
     }
     document.exportError = DISP_E_EXCEPTION;
     AddIn addin;
+    Record retry;
+    auto lost = std::make_unique<SnapshotTransfer>();
+    lost->native = true;
+    lost->nativeToken = "pinned-save";
+    lost->checksum = "its-digest";
+    lost->thread = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+    lost->error = std::make_exception_ptr(BridgeUnavailable("lost reply"));
+    retry.transfer = std::move(lost);
+    try { addin.finishTransfer(retry, true); require(false, "Lost reply was acknowledged"); }
+    catch (const BridgeUnavailable &) {}
+    require(retry.savedFile && retry.savedFile->nativeToken == "pinned-save" &&
+            retry.savedFile->checksum == "its-digest" && !retry.savedFile->error &&
+            !retry.savedFile->thread, "Failed native receipt cannot retry the pinned save");
+
     addin.busy = true;
     addin.closing["test"] = doc;
     addin.finishClose();

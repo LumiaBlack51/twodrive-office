@@ -113,6 +113,7 @@ class Session:
     native_publish: bool = False
     native_token: str = ""
     native_revision: int = 0
+    native_receipt: tuple | None = None
 
 
 class Bridge:

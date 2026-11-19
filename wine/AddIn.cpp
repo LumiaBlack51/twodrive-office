@@ -30,11 +30,12 @@ struct Ribbon : IDispatch {
 };
 HMODULE moduleHandle;
 LONG objects = 0;
+struct BridgeUnavailable : std::runtime_error { using std::runtime_error::runtime_error; };
 struct Internet {
   HINTERNET h;
   explicit Internet(HINTERNET h) : h(h) {
     if (!h)
-      throw std::runtime_error("Bridge connection failed");
+      throw BridgeUnavailable("Bridge connection failed");
   }
   ~Internet() { WinHttpCloseHandle(h); }
 };
@@ -87,13 +88,13 @@ struct Http {
       read_blocks(upload, total, [&](const BYTE *data, DWORD size) {
         DWORD written = 0;
         if (!WinHttpWriteData(req.h, data, size, &written) || written != size)
-          throw std::runtime_error("Incomplete private export transfer");
+          throw BridgeUnavailable("Incomplete private export transfer");
       });
     }
     if (!sent || !WinHttpReceiveResponse(req.h, nullptr)) {
       auto error = GetLastError();
       wake();
-      throw std::runtime_error("保存服务连接失败（WinHTTP " +
+      throw BridgeUnavailable("保存服务连接失败（WinHTTP " +
                                std::to_string(error) +
                                "）；请检查容器保存端口连接");
     }
@@ -101,19 +102,21 @@ struct Http {
     if (!WinHttpQueryHeaders(
             req.h, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
             nullptr, &status, &n, nullptr))
-      throw std::runtime_error("Invalid HTTP reply");
+      throw BridgeUnavailable("Invalid HTTP reply");
     std::string result;
     char buf[4096];
     DWORD got = 0;
     while (true) {
       if (!WinHttpReadData(req.h, buf, sizeof(buf), &got))
-        throw std::runtime_error("保存服务响应中断；尚未确认保存成功");
+        throw BridgeUnavailable("保存服务响应中断；尚未确认保存成功");
       if (!got)
         break;
       result.append(buf, got);
       if (result.size() > 65536)
         throw std::runtime_error("Bridge response too large");
     }
+    if (status == 408 || status == 429 || status >= 500)
+      throw BridgeUnavailable("Temporary save bridge error " + std::to_string(status));
     if (status != 200) {
       if (status == 404 && field(result, "error") == "session_closed")
         throw SessionClosed();
@@ -143,7 +146,7 @@ struct SnapshotTransfer {
     auto &job = *static_cast<SnapshotTransfer *>(argument);
     try {
       if (job.native) {
-        auto content = hex(digest_file(job.file));
+        if (job.checksum.empty()) job.checksum = hex(digest_file(job.file));
         BY_HANDLE_FILE_INFORMATION current{};
         if (!GetFileInformationByHandle(job.file, &current) ||
             CompareFileTime(&current.ftLastWriteTime, &job.savedStamp.ftLastWriteTime) != 0 ||
@@ -152,7 +155,7 @@ struct SnapshotTransfer {
           throw std::runtime_error("确认期间原生文件发生变化，恢复版本已保留");
         if (job.nativeToken.empty())
           job.nativeToken = field(job.bridge.request(L"POST", job.path + "/native-explicit"), "native_token");
-        job.bridge.request(L"POST", job.path + "/native-digest", content,
+        job.bridge.request(L"POST", job.path + "/native-digest", job.checksum,
                            "X-TwoDrive-Native-Token: " + job.nativeToken + "\r\n");
       } else {
         auto content = job.file == INVALID_HANDLE_VALUE ? utf8(job.wordXml) : std::string();
@@ -462,7 +465,19 @@ class AddIn : public Ext, public Ribbon {
     if (result == WAIT_TIMEOUT) return false;
     if (result != WAIT_OBJECT_0) throw std::runtime_error("Cannot check snapshot transfer");
     auto job = std::move(record.transfer);
-    if (job->error) std::rethrow_exception(job->error);
+    if (job->error) {
+      try { std::rethrow_exception(job->error); }
+      catch (const BridgeUnavailable &) {
+        if (job->native && !record.savedFile) {
+          // Retry this exact pinned save, unless a newer after-save event won.
+          CloseHandle(job->thread);
+          job->thread = nullptr;
+          job->error = nullptr;
+          record.savedFile = std::move(job);
+        }
+        throw;
+      }
+    }
     if (job->native) {
       record.lastSnapshot.clear();
       record.quietSnapshot = false;
