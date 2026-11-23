@@ -123,8 +123,9 @@ the listener descriptor to a host process, and forwards to the existing host
 bridge. Authentication, Host/Origin checks, sessions and save policy stay in
 that single bridge. It does not enable host networking or expose a LAN listener.
 The relay exits when that particular container PID/namespace disappears, or after
-30 seconds without connections once forwarding finishes. Before its first
-connection it allows a 60-second startup window. A retained container or orphaned
+90 seconds without connections once forwarding finishes. The first connection
+also has 90 seconds after wakeup, allowing for Office's 60-second retry backoff
+and the next timer tick. A retained container or orphaned
 Office PID alone cannot keep it resident. Shutdown signals forwarding workers;
 an idle peer cannot keep a worker waiting forever.
 

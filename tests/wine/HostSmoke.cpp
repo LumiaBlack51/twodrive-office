@@ -105,7 +105,7 @@ int wmain(int argc, wchar_t **argv) {
         app.put(L"Visible", V(true));
       // No documents/heartbeats: the relay must exit despite the real Office
       // process remaining alive, then wake when this same instance opens one.
-      pump(35000);
+      pump(100000); // 90-second relay idle timeout plus startup/timer slack.
       ready(directory + L"\\empty-idle.ready");
       auto reopenBy = GetTickCount64() + 15000;
       while (GetFileAttributesW((directory + L"\\allow-reopen").c_str()) ==

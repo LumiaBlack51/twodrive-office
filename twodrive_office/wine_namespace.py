@@ -247,7 +247,9 @@ def forward(client, port, stop):
             pass
 
 
-def relay(pid, port, ready_fd, *, startup_timeout=60, idle_timeout=30):
+# Office can wait 60 seconds after a failure, plus time until its STA timer
+# runs. Keep both the initial listener and a used listener across that retry.
+def relay(pid, port, ready_fd, *, startup_timeout=90, idle_timeout=90):
     expected = identity(pid)
     directory = Path(os.environ.get('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')) / 'twodrive-office'
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
