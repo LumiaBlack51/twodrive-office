@@ -122,11 +122,12 @@ bridge port**. It binds `127.0.0.1` in the owned container namespace, transfers
 the listener descriptor to a host process, and forwards to the existing host
 bridge. Authentication, Host/Origin checks, sessions and save policy stay in
 that single bridge. It does not enable host networking or expose a LAN listener.
-The relay exits when that particular container PID/namespace disappears, or after
-90 seconds without connections once forwarding finishes. The first connection
-also has 90 seconds after wakeup, allowing for Office's 60-second retry backoff
-and the next timer tick. A retained container or orphaned
-Office PID alone cannot keep it resident. Shutdown signals forwarding workers;
+The relay exits when that container PID or namespace disappears. After wakeup
+it waits up to 90 seconds for the first connection. Once it accepts a connection,
+the relay exits when all forwarding workers have finished and 90 seconds have
+elapsed since the last accepted connection. These windows allow for Office's
+60-second retry backoff and the next timer tick. A retained container or
+orphaned Office PID alone cannot keep the relay resident. Shutdown signals forwarding workers;
 an idle peer cannot keep a worker waiting forever.
 
 cpak can run Office in a nested user namespace while keeping the outer
