@@ -4,7 +4,9 @@ Windows 原生 Microsoft Office 的 Word/Excel/PowerPoint 自动保存预览候�
 
 ONLYOFFICE Desktop Editors、LibreOffice 和 Wine/Soda Microsoft Office 的 TwoDrive 自动保存插件，当前源码为 0.3.1 开发预览版（本地保存与定时同步）。
 
-源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。安装包、校验值与验证摘要见 [v0.3.1 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.1)。
+源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。安装包、校验值与验证摘要见 [v0.3.2 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.2)。
+
+Artcraft 系列另有 TwoDrive 普通插件 0.2.0-preview.2，面向共同插件协议 2.2 的待合并提案。官方 WordCraft / GridCraft / DeckCraft 尚无相应宿主，因此本次只交付预览包，等官方支持后再安装；不改原生 AutoSave、不重新编译 Office、不新增启动器。插件提供应用内 TwoDrive 标签，自动同步磁盘上的已保存版本，不能导出未保存修改。构建、协议来源及边界见 [Artcraft 说明](docs/artcraft.md)。
 
 打开位于 TwoDrive 挂载目录内的文档后，会自动开启本地保存。修改先持久保存到挂载外的私有目录，默认每 180 秒将最新版本提交到 TwoDrive，关闭文档或点“立即保存”时立即提交。目录外或未命名文档默认关闭，用户手动开启后保存当前编辑内容的副本。默认副本目录是 `~/TwoDrive/OneDrive/Office AutoSave`，用户可以在开启/保存时选择 TwoDrive 内的其他目录。
 
@@ -27,7 +29,7 @@ python3 scripts/install.py --onlyoffice --bridge
 
 可安装包位于 `dist/twodrive-autosave-0.3.1.oxt` 和 `dist/twodrive-autosave-0.3.1.plugin`。通过 ONLYOFFICE 插件管理器安装通用包时，还需要本地 bridge；项目安装脚本会自动写入连接配置。
 
-Wine/Soda 下的 Microsoft 365 x64：解压 `twodrive-autosave-0.3.1-wine-x64.zip`，正常退出 bottle 后运行 `python3 scripts/install_wine.py --prefix /绝对/bottle/路径 --bridge`。使用 Linux 保存服务加原生 COM 加载项，支持 Word、Excel、PowerPoint；操作和兼容边界见 [Wine 安装与说明](docs/wine.md)。原位模式的星号由 Office 原生保存清除，本地暂存成功仍保留星号，默认 180 秒、关闭或“立即保存”时提交。
+Wine/Soda 下的 Microsoft 365 x64：解压 `twodrive-autosave-0.3.2-wine-x64.zip`，正常退出 bottle 后运行 `python3 scripts/install_wine.py --prefix /绝对/bottle/路径 --bridge`。使用 Linux 保存服务加原生 COM 加载项，支持 Word、Excel、PowerPoint；操作和兼容边界见 [Wine 安装与说明](docs/wine.md)。原位模式的星号由 Office 原生保存清除，本地暂存成功仍保留星号，默认 180 秒、关闭或“立即保存”时提交。
 
 自定义默认副本目录：
 

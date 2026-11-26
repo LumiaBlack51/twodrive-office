@@ -17,19 +17,28 @@ CLSID = '{C53A8F6A-D977-4D1F-A832-6C40203D6419}'
 PROGID = 'TwoDrive.Office.WineAutoSave'
 
 
-def prefix_running(prefix):
+def prefix_processes(prefix, proc=Path('/proc')):
+    """Report unreleased Wine processes, without claiming a window is open."""
     prefix = str(prefix.resolve())
-    for process in Path('/proc').glob('[0-9]*'):
+    result = []
+    for process in proc.glob('[0-9]*'):
         try:
             if process.stat().st_uid != os.getuid():
                 continue
             env = dict(item.split(b'=', 1) for item in (process / 'environ').read_bytes().split(b'\0') if b'=' in item)
             value = env.get(b'WINEPREFIX', b'').decode()
             if value and str(Path(value).resolve()) == prefix:
-                return True
+                state = (process / 'stat').read_text().rsplit(') ', 1)[1].split()[0]
+                if state not in ('Z', 'X'):
+                    result.append({'pid': int(process.name), 'name': (process / 'comm').read_text().strip(),
+                                   'state': state})
         except (OSError, UnicodeError):
             pass
-    return False
+    return result
+
+
+def prefix_running(prefix):
+    return bool(prefix_processes(prefix))
 
 
 def reg_string(value):
@@ -52,6 +61,11 @@ def registry_sections(windows_directory):
             '"Description"': '"Local durable snapshots and guarded TwoDrive saving"',
             '"LoadBehavior"': 'dword:00000003',
         }
+        # Office C2R/AppV can retain a disconnected value in its virtual
+        # machine registry, overriding the ordinary HKLM registration.
+        result[f'Software\\Microsoft\\Office\\ClickToRun\\REGISTRY\\Machine\\Software\\Microsoft\\Office\\{host}\\Addins\\{PROGID}'] = {
+            '"LoadBehavior"': 'dword:00000003',
+        }
     return result
 
 
@@ -59,10 +73,10 @@ def patch_registry(text, sections, uninstall=False):
     """Only own sections are replaced; no import subprocess or global profile."""
     lines = text.splitlines(keepends=True)
     output, i = [], 0
-    encoded = {key.replace('\\', '\\\\') for key in sections}
+    encoded = {key.replace('\\', '\\\\').casefold() for key in sections}
     while i < len(lines):
         line = lines[i]
-        if line.startswith('[') and ']' in line and line[1:line.index(']')] in encoded:
+        if line.startswith('[') and ']' in line and line[1:line.index(']')].casefold() in encoded:
             i += 1
             while i < len(lines) and not lines[i].startswith('['):
                 i += 1
@@ -78,13 +92,13 @@ def patch_registry(text, sections, uninstall=False):
     return ''.join(output)
 
 
-def install(prefix, dll, settings, *, uninstall=False):
+def install(prefix, dll, settings, *, uninstall=False, sandbox_wakeup=False):
     prefix = prefix.expanduser().resolve()
     registry = prefix / 'system.reg'
     if not registry.is_file() or not (prefix / 'user.reg').is_file() or not (prefix / 'drive_c').is_dir():
         raise SaveError('不是已有 Wine prefix')
     if prefix_running(prefix):
-        raise SaveError('此 Wine prefix 仍有进程，请正常退出该 bottle 后再安装')
+        raise SaveError('此 bottle 的 Wine/Office 进程尚未释放，可能是退出残留；不能据此认定窗口仍打开。请先停止该 bottle 再安装')
     if registry.is_symlink():
         raise SaveError('拒绝符号链接注册表')
     users = prefix / 'drive_c/users'
@@ -95,7 +109,7 @@ def install(prefix, dll, settings, *, uninstall=False):
     # Refuse a path which follows an inherited link outside the chosen prefix.
     if not destination.resolve().is_relative_to(prefix):
         raise SaveError('插件目录指向所选 Wine prefix 外部')
-    if any((destination / name).is_symlink() for name in ('TwoDrive.Wine.dll', 'TwoDrive.Wine.dll.previous', 'bridge.ini', 'LICENSE')):
+    if any((destination / name).is_symlink() for name in ('TwoDrive.Wine.dll', 'TwoDrive.Wine.dll.previous', 'bridge.ini', 'LICENSE', 'relay.request')):
         raise SaveError('插件文件是符号链接，安装已停止')
     windows_directory = 'C:\\' + str(destination.relative_to(prefix / 'drive_c')).replace('/', '\\')
     sections = registry_sections(windows_directory)
@@ -118,7 +132,8 @@ def install(prefix, dll, settings, *, uninstall=False):
         (destination / 'TwoDrive.Wine.dll').write_bytes(binary)
         (destination / 'LICENSE').write_bytes((ROOT / 'LICENSE').read_bytes())
         config = destination / 'bridge.ini'
-        config.write_text(f'[bridge]\nport={settings.bridge_port}\ntoken={settings.bridge_token}\nprefix={prefix}\n', encoding='utf-16')
+        config.write_text(f'[bridge]\nport={settings.bridge_port}\ntoken={settings.bridge_token}\nprefix={prefix}\n'
+                          + ('sandbox_wakeup=1\n' if sandbox_wakeup else ''), encoding='utf-16')
         config.chmod(0o600)
     fd, name = tempfile.mkstemp(prefix='.twodrive-reg-', dir=prefix)
     try:
@@ -133,23 +148,87 @@ def install(prefix, dll, settings, *, uninstall=False):
     return destination
 
 
+def sandbox_units(prefix, destination, runtime, config=None):
+    import hashlib
+    name = 'twodrive-wine-' + hashlib.sha256(str(prefix.resolve()).encode()).hexdigest()[:16]
+    def escaped(value):
+        if any(c in str(value) for c in ('\n', '\r', '\x00')):
+            raise SaveError('systemd 路径包含控制字符')
+        return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('$', '$$') + '"'
+    def path_value(value):
+        if any(c in str(value) for c in ('\n', '\r', '\x00', '\\')):
+            raise SaveError('systemd 路径包含不支持的字符')
+        return str(value).replace('%', '%%')
+    request = destination / 'relay.request'
+    service = '\n'.join([
+        '[Unit]', 'Description=TwoDrive Wine sandbox relay (on demand)', '',
+        '[Service]', 'Type=simple', 'Restart=no', 'UMask=0077', 'Nice=10',
+        'Environment=PYTHONDONTWRITEBYTECODE=1',
+        'WorkingDirectory=' + path_value(runtime),
+        'ExecStart=/usr/bin/python3 -m twodrive_office.wine_namespace --request-prefix ' + escaped(prefix)
+        + (' --config ' + escaped(config) if config else ''), '',
+    ])
+    path = '\n'.join([
+        '[Unit]', 'Description=TwoDrive Wine sandbox wakeup', '',
+        '[Path]', 'PathExists=' + path_value(request), 'Unit=' + name + '.service', '',
+        '[Install]', 'WantedBy=paths.target', '',
+    ])
+    return name, {name + '.service': service, name + '.path': path}
+
+
+def install_sandbox_wakeup(prefix, destination):
+    import subprocess
+    runtime = Path.home() / '.local/lib/twodrive-office'
+    units = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'systemd/user'
+    name, files = sandbox_units(prefix, destination, runtime)
+    units.mkdir(parents=True, exist_ok=True)
+    for filename, content in files.items():
+        (units / filename).write_text(content)
+    subprocess.run(['systemd-analyze', '--user', 'verify', *[str(units / f) for f in files]], check=True)
+    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
+    subprocess.run(['systemctl', '--user', 'enable', '--now', name + '.path'], check=True)
+    return name
+
+
+def uninstall_sandbox_wakeup(prefix, destination):
+    import subprocess
+    units = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'systemd/user'
+    name, files = sandbox_units(prefix, destination, Path.home() / '.local/lib/twodrive-office')
+    if not any((units / filename).exists() for filename in files):
+        return
+    subprocess.run(['systemctl', '--user', 'disable', '--now', name + '.path'], check=True)
+    subprocess.run(['systemctl', '--user', 'stop', name + '.service'], check=True)
+    for filename in files:
+        (units / filename).unlink(missing_ok=True)
+    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--prefix', type=Path, required=True)
     parser.add_argument('--dll', type=Path, default=(ROOT / 'dist/wine/TwoDrive.Wine.dll' if (ROOT / 'dist/wine/TwoDrive.Wine.dll').exists() else ROOT / 'wine/TwoDrive.Wine.dll'))
     parser.add_argument('--bridge', action='store_true', help='Install the Linux socket-activated bridge')
+    parser.add_argument('--sandbox-wakeup', action='store_true', help='Install event-driven Wine sandbox relay activation (requires --bridge)')
     parser.add_argument('--uninstall', action='store_true')
     args = parser.parse_args()
     try:
         settings = Settings.load()
+        if args.sandbox_wakeup and (not args.bridge or args.uninstall):
+            raise SaveError('--sandbox-wakeup 需要与 --bridge 一起安装')
         if args.bridge and not args.uninstall:
             if prefix_running(args.prefix):
-                raise SaveError('请先正常退出该 Wine bottle')
-            settings = settings.save()
-        destination = install(args.prefix, args.dll, settings, uninstall=args.uninstall)
+                raise SaveError('Wine/Office 进程尚未释放（可能是退出残留）；请先停止该 bottle')
+            if not settings.bridge_token:
+                settings = settings.save()
+        destination = install(args.prefix, args.dll, settings, uninstall=args.uninstall,
+                              sandbox_wakeup=args.sandbox_wakeup)
+        if args.uninstall:
+            uninstall_sandbox_wakeup(args.prefix, destination)
         if args.bridge and not args.uninstall:
             from bridge_install import install_bridge
             install_bridge(settings)
+            if args.sandbox_wakeup:
+                install_sandbox_wakeup(args.prefix, destination)
         print('已移除 COM 注册；设置和待同步版本保留' if args.uninstall else '已安装，下次启动 Office 生效：' + str(destination))
     except (SaveError, OSError, ValueError, struct.error) as exc:
         parser.exit(1, str(exc) + '\n')

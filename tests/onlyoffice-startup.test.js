@@ -5,7 +5,8 @@ const {join} = require("node:path");
 const vm = require("node:vm");
 const {AutoSave} = require("../onlyoffice/autosave.js");
 
-async function startup({source = "/mount/deck.pptx", inPlace = true, failure = null, beacon = null} = {}) {
+async function startup({source = "/mount/deck.pptx", inPlace = true, failure = null, beacon = null,
+    expireSession = false, reopenFailure = null} = {}) {
     const controls = new Map(), calls = [], events = {}, timers = [];
     let engine;
     function control(id) {
@@ -30,6 +31,12 @@ async function startup({source = "/mount/deck.pptx", inPlace = true, failure = n
         async fetch(url, options) {
             const path = new URL(url).pathname;
             calls.push({path, method: options.method || "GET"});
+            if (expireSession && path === "/sessions/session-id" && !options.method) {
+                expireSession = false;
+                return {ok: false, json: async () => ({error: "session_closed"})};
+            }
+            if (reopenFailure && path === "/sessions" && calls.filter(c => c.path === "/sessions").length > 1)
+                return {ok: false, json: async () => ({error: reopenFailure})};
             const data = path === "/settings" ? {copy_directory: "/mount/Copies"} :
                 failure && path === "/sessions" ? {error: failure} :
                 {session_id: "session-id", target: "/mount/deck.pptx", in_place: inPlace, extension: "pptx"};
@@ -47,7 +54,26 @@ test("TwoDrive startup enables an unchanged document without any snapshot writes
     assert.equal(state.controls.get("enabled").checked, true);
     for (let i = 0; i < 20; i++) for (const timer of state.timers) await timer();
     assert.equal(state.engine.dueAt, null);
-    assert.deepEqual(state.calls.map(call => call.path), ["/settings", "/sessions"]);
+    assert.deepEqual(state.calls.slice(0, 2).map(call => call.path), ["/settings", "/sessions"]);
+    assert.equal(state.calls.filter(call => call.path === "/sessions/session-id").length, 20);
+    assert.equal(state.calls.some(call => call.path.endsWith("/snapshot")), false);
+});
+
+test("an editor resumes a session after idle bridge exit through normal validation", async () => {
+    const state = await startup({expireSession: true});
+    await state.timers[1]();
+    assert.equal(state.calls.filter(call => call.path === "/sessions").length, 2);
+    assert.equal(state.engine.enabled, true);
+    assert.equal(state.controls.get("enabled").checked, true);
+});
+
+test("retained recovery data blocks reopening an old editor model", async () => {
+    const state = await startup({expireSession: true, reopenFailure: "此目标有未完成的本地版本，请先处理待同步状态"});
+    await state.timers[1]();
+    assert.equal(state.engine.enabled, false);
+    assert.equal(state.controls.get("enabled").checked, false);
+    assert.match(state.controls.get("status").textContent, /本地版本/);
+    assert.equal(state.calls.some(call => call.path.endsWith("/snapshot")), false);
 });
 
 test("canonical bridge classification rejects automatic copy sessions and closes them", async () => {

@@ -1,0 +1,38 @@
+{
+  "protocol": "2.2",
+  "framing_protocol_version": 1,
+  "status": "unmerged-host-proposals-not-official-support",
+  "checked_on": "2026-11-15",
+  "hosts": {
+    "wordcraft": {
+      "repo": "sirmmo/wordcraft",
+      "sha": "74eaa3184f2408b1fe76f210075370b913916551",
+      "upstream_pr": "https://github.com/storytold/wordcraft/pull/2586",
+      "files": {
+        "crates/plugin/src/process.rs": "d20d25419d455659ac61ced499ead4952017ae10f048efcec15a7376ed473966",
+        "crates/plugin/src/dialog.rs": "5ef6c72bac56f719a12218919ee6f6bb59b109da42cec4fc2623209639e1d10c",
+        "crates/plugin/src/push.rs": "720d957ba38830477fad0285980678f28639e722ddb6df00494b2b94acb044b8"
+      }
+    },
+    "gridcraft": {
+      "repo": "sirmmo/gridcraft",
+      "sha": "3e325c1c2c2e35cf7acc6c01bda8b326739ec0a3",
+      "upstream_pr": "https://github.com/storytold/gridcraft/pull/1123",
+      "files": {
+        "crates/plugin/src/process.rs": "b9204293e31216b49a79bad7b3e7edda21ed83cfa7e9fdfaecee5b4f46efa882",
+        "crates/plugin/src/dialog.rs": "39c2d6d54c9d81af9a4faffb8e68366a83a4c14ad9e956f9e0d84625351c766e",
+        "crates/plugin/src/push.rs": "a85a1dcda3653fa9bc65b98e96bc3c8e01d212b4038112741c854f3a20cadb10"
+      }
+    },
+    "deckcraft": {
+      "repo": "sirmmo/deckcraft",
+      "sha": "4763e9497687ac260d6cb5d83f3f86c3ea3206d1",
+      "upstream_pr": "https://github.com/storytold/deckcraft/pull/919",
+      "files": {
+        "crates/plugin/src/process.rs": "f438c643b80bef17db3f28c567f78cf336be1df053a66537f5a400ac6b7942d9",
+        "crates/plugin/src/dialog.rs": "722a8cae36839442cd23761e4fd9b76bcc203554f57d414c559156495abcda76",
+        "crates/plugin/src/push.rs": "a85a1dcda3653fa9bc65b98e96bc3c8e01d212b4038112741c854f3a20cadb10"
+      }
+    }
+  }
+}

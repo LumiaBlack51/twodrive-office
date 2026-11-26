@@ -1,4 +1,5 @@
 import argparse
+import math
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,9 +17,9 @@ def main():
     sub.add_parser("status", help="检查设置和挂载（不显示凭据）")
     sub.add_parser("pending", help="列出保留的本地待同步版本（不修改或提交）")
     sub.add_parser("recover", help="所有办公软件退出后，安全重试保留的本地版本")
-    serve = sub.add_parser("serve", help="启动 ONLYOFFICE 的本地桥接服务")
-    serve.add_argument("--idle-timeout", type=float, default=0,
-                       help="ONLYOFFICE 退出且没有请求后自动退出的秒数；0 为手动常驻")
+    serve = sub.add_parser("serve", help="按需启动本地桥接服务")
+    serve.add_argument("--idle-timeout", type=float, default=30,
+                       help="无进行中的请求及认证请求/心跳后退出的秒数（正有限数，默认 30）")
     args = parser.parse_args()
     try:
         settings = Settings.load(args.config)
@@ -56,32 +57,14 @@ def main():
             print("设置已保存：", args.config)
         elif args.command == "serve":
             from .bridge import Bridge, make_server
-            from .lifecycle import OfficePresence, activation_socket, ALL_EDITORS
-            if args.idle_timeout < 0:
-                raise SaveError("退出延迟不能为负数")
+            from .lifecycle import activation_socket, serve_on_demand
+            if not math.isfinite(args.idle_timeout) or args.idle_timeout <= 0:
+                raise SaveError("退出延迟必须是大于零的有限秒数")
             bridge = Bridge(settings)
             server = make_server(bridge, listener=activation_socket(settings.bridge_port))
             print(f"TwoDrive Office 本地服务：http://127.0.0.1:{settings.bridge_port}", flush=True)
             try:
-                if args.idle_timeout:
-                    office = OfficePresence()
-                    all_office = OfficePresence(names=ALL_EDITORS)
-                    server.timeout = 1
-                    while True:
-                        server.handle_request()
-                        bridge.local_saves.tick()
-                        if server.activity.idle(args.idle_timeout) and not office.running():
-                            for key in list(bridge.sessions):
-                                bridge.close(key)
-                            if not all_office.running():
-                                bridge.local_saves.allow_recovery()
-                                bridge.local_saves.tick()
-                            if bridge.local_saves.pending():
-                                continue
-                            print("ONLYOFFICE 已关闭，桥接服务按需退出", flush=True)
-                            break
-                else:
-                    server.serve_forever()
+                serve_on_demand(server, args.idle_timeout)
             except KeyboardInterrupt:
                 pass
             finally:

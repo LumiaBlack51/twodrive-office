@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import os
 import posixpath
@@ -45,6 +46,16 @@ def resolve_wine_path(prefix, source):
     drive = prefix / 'dosdevices' / (source[0].lower() + ':')
     if not drive.is_symlink():
         raise SaveError('Wine 盘符映射不存在')
+    components = source[3:].replace('\\', '/').split('/')
+    if '..' in components:
+        raise SaveError('Wine 文档路径包含父目录跳转')
+    # A cpak grant exists only in Office's mount namespace. Translate its live
+    # bind mount to the host original instead of treating /run/cpak as a host
+    # path. Repeated source() calls revalidate both mappings before each save.
+    lexical = Path(os.path.abspath(drive.parent / os.readlink(drive))).joinpath(*components)
+    if lexical.is_relative_to('/run/cpak/grants'):
+        from .wine_namespace import resolve_granted_path
+        return resolve_granted_path(prefix, lexical)
     target = drive.resolve(strict=True)
     for component in source[3:].replace('\\', '/').split('/'):
         if component in ('', '.'):
@@ -158,16 +169,29 @@ def prepare_native(bridge, key, *, explicit=False):
             check_source(session.source)
         else:
             bridge.validate_unchanged_target(session)
+        session.native_receipt = None
         session.native_token = secrets.token_urlsafe(24)
         session.native_revision = session.last_revision
         return {'status': 'native_save_ready', 'target': str(session.plan.target), 'native_token': session.native_token}
 
 
 def complete_native(bridge, key, content, token):
+    # Compatibility with installed adapters that send their saved bytes.
+    return complete_native_digest(bridge, key, hashlib.sha256(content).hexdigest().encode(), token, replay=False)
+
+
+def complete_native_digest(bridge, key, digest, token, *, replay=True):
     session = bridge.sessions.get(key)
     if session is None or not session.native_publish:
         raise SaveError('不是 Office 原位保存会话')
     with session.lock:
+        if replay and session.native_receipt and not session.native_token:
+            accepted_token, accepted_digest, revision, saved = session.native_receipt
+            if (secrets.compare_digest(token or '', accepted_token) and digest == accepted_digest
+                    and session.last_revision == revision):
+                prepare_target(bridge.settings, session.plan)
+                if fingerprint(session.plan.target) == saved:
+                    return bridge.saved_result(session)
         if (not token or not secrets.compare_digest(token, session.native_token)
                 or session.last_revision != session.native_revision):
             raise SaveError('原生保存确认已过期，本地版本已保留')
@@ -176,11 +200,21 @@ def complete_native(bridge, key, content, token):
         before = fingerprint(session.plan.target)
         # An acknowledgement cannot discard a pending revision unless Office's
         # just-read native file is still exactly present at the guarded target.
-        if before[2] != len(content) or session.plan.target.read_bytes() != content or fingerprint(session.plan.target) != before:
+        if before is None or not 0 < before[2] <= LIMIT:
             raise SaveError('原生保存确认期间目标改变，本地版本已保留')
-        from .bridge import validate_document
-        validate_document(content, session.plan.extension)
-        session.local.native_saved()
+        from .bridge import validate_package
+        with session.plan.target.open('rb') as saved:
+            checksum = hashlib.sha256()
+            while block := saved.read(256 * 1024):
+                checksum.update(block)
+            if not secrets.compare_digest(checksum.hexdigest().encode('ascii'), digest):
+                raise SaveError('原生保存确认期间目标改变，本地版本已保留')
+            saved.seek(0)
+            validate_package(saved, session.plan.extension)
+        if fingerprint(session.plan.target) != before:
+            raise SaveError('原生保存确认期间目标改变，本地版本已保留')
+        session.local.native_saved(before)
+        session.native_receipt = (token, digest, session.last_revision, before)
         session.native_token = ''
         session.content_digest = None
         return bridge.saved_result(session)

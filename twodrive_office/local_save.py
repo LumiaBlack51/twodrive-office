@@ -122,14 +122,14 @@ class LocalRevision:
         if hasattr(self, "guard"):
             self.guard.close()
 
-    def native_saved(self):
+    def native_saved(self, verified=None):
         """An editor's successful explicit Save supersedes its staged revision."""
         with self.lock:
             self.manifest.unlink(missing_ok=True)
             if self.blob:
                 self.blob.unlink(missing_ok=True)
             self.blob = None
-            self.expected = fingerprint(self.plan.target)
+            self.expected = verified if verified is not None else fingerprint(self.plan.target)
             self.due_at = self.clock() + self.settings.sync_interval_seconds
             self.error, self.failures, self.retry_at = "", 0, 0
 
