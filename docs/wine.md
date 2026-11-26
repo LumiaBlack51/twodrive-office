@@ -1,9 +1,9 @@
-# Microsoft Office on Wine / Soda (0.3.1 Preview)
+# Microsoft Office on Wine / Soda
 
 This adapter runs a small native x64 COM DLL inside Word, Excel and PowerPoint.
 The existing Linux Python bridge validates paths and persists local revisions.
 It does not require .NET, VSTO, Microsoft Graph access or changes to TwoDrive.
-The Windows/CFAPI candidate in PR #7 is a separate, unfinished integration.
+Download the [v0.3.2 Linux preview](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.2). For native Windows, see the [CFAPI add-in guide](https://github.com/LumiaBlack51/twodrive-office/blob/main/docs/msoffice.md).
 
 Named DOCX/XLSX/PPTX files inside the configured TwoDrive mount enable on open.
 The Office STA timer checks documents once per second. Timer captures normally
@@ -28,7 +28,7 @@ ONLYOFFICE/LibreOffice local-snapshot acknowledgement. Ctrl+S retains its ordina
 native behavior and its observed save event reconciles the local queue. Local
 saving and mount publication do not prove completed OneDrive upload.
 
-The unreleased Word export failure guard preserves Office's exception code and
+The Word export failure guard preserves Office's exception code and
 description instead of showing only `80020009`. A returned `WordOpenXML`
 serializer exception pauses that document's automatic saving, retaining its
 native dirty flag and any earlier durable revision. It no longer retries the
@@ -78,7 +78,7 @@ it does not launch Wine or an editor, change macro trust, run a login poller, or
 alter another bottle. This installation needs the machine-level keys **inside the
 bottle**: this Wine setup does not merge these per-user classes into HKCR, and
 Office did not enumerate the per-user Addins entries. It needs no host root access.
-The unreleased installer also updates this add-in's three Click-to-Run virtual
+The v0.3.2 installer also updates this add-in's three Click-to-Run virtual
 machine Addins keys. A retained `LoadBehavior=2` there can override the ordinary
 registration's `3`, leaving the component installed but disconnected. Other
 add-ins, trust settings and security policies are not changed. Startup tests now
@@ -88,7 +88,7 @@ refresh the collection to hide a failed automatic connection.
 ```bash
 python3 -m twodrive_office.cli configure
 python3 scripts/install_wine.py --prefix /absolute/path/to/bottle --bridge
-# Unreleased fix: isolated cpak networking with event-driven reactivation:
+# For isolated cpak networking with event-driven reactivation
 python3 scripts/install_wine.py --prefix /absolute/path/to/bottle --bridge --sandbox-wakeup
 # Remove only this COM registration, keeping settings and pending user data:
 python3 scripts/install_wine.py --prefix /absolute/path/to/bottle --uninstall
@@ -96,7 +96,7 @@ python3 scripts/install_wine.py --prefix /absolute/path/to/bottle --uninstall
 
 The bridge shares the existing authenticated loopback socket with ONLYOFFICE.
 The systemd user manager retains just the socket; Python starts on connection
-and, in the unreleased lifecycle fix, exits after 30 seconds without authenticated
+and exits after 30 seconds without authenticated
 traffic and with no request in flight. An orphaned Office PID never retains it;
 failed pending data stays on disk for a later connection or explicit recovery.
 Editor presence still blocks unsafe recovery, not process exit. The DLL's existing
@@ -111,19 +111,19 @@ relative and ambiguous case-folded paths are refused. This also avoids the insta
 Office/AppV process's failure to use Wine's Unix-name API, which worked in a standalone
 Wine probe but failed inside Office.
 
-### cpak isolated networking (unreleased fix)
+### cpak isolated networking
 
 The ordinary loopback installation requires Office to reach the host's
 `127.0.0.1`. cpak uses a separate network namespace and can launch slirp4netns
 with `--disable-host-loopback`; changing the address to `10.0.2.2` does not enable
 that blocked route ([slirp4netns reference](https://github.com/rootless-containers/slirp4netns/blob/master/slirp4netns.1.md#filtering-connections)).
-The unreleased fix provides a relay for **only the configured
+The Linux runtime provides a relay for **only the configured
 bridge port**. It binds `127.0.0.1` in the owned container namespace, transfers
 the listener descriptor to a host process, and forwards to the existing host
 bridge. Authentication, Host/Origin checks, sessions and save policy stay in
 that single bridge. It does not enable host networking or expose a LAN listener.
-The relay exits when that container PID or namespace disappears. After wakeup
-it waits up to 90 seconds for the first connection. Once it accepts a connection,
+The relay exits when that container PID or namespace disappears. In v0.3.2 the startup and idle windows are 60 and 30 seconds respectively.
+On the main branch, after wakeup it waits up to 90 seconds for the first connection. Once it accepts a connection,
 the relay exits when all forwarding workers have finished and 90 seconds have
 elapsed since the last accepted connection. These windows allow for Office's
 60-second retry backoff and the next timer tick. A retained container or
@@ -139,7 +139,7 @@ leaves the DLL reporting WinHTTP 12029. Linux namespace ioctls and `nsenter`
 with explicit namespace-file arguments are required; host root privileges and
 changes to cpak's network policy are unnecessary.
 
-The recommended unreleased installation uses `--bridge --sandbox-wakeup` with
+Install cpak wakeup support using `--bridge --sandbox-wakeup` with
 the bottle stopped. It installs a per-prefix systemd user `.path` unit and an
 on-demand relay service. On a failed connection, the DLL creates an empty private
 `relay.request` directory beside itself, at most once every five seconds. The
@@ -188,14 +188,12 @@ longer claim that a revision was retained before any snapshot reached Linux.
 
 ## Compatibility and reproduction
 
-Only native **x64** Office is supported by this package. The current installation
-is Microsoft 365 Office16 on Soda `11.0-37-office-v7`; exact actual verification
-results are recorded in [verification.md](verification.md). The COM loader,
+Only native **x64** Office is supported by this package. Early checks used Microsoft 365 Office16 on Soda `11.0-37-office-v7`. Later checks and their runtime versions are recorded in [verification.md](verification.md). The COM loader,
 Office timer, save events and callback methods are tested against real applications,
 not just an Office model mock. Actual mouse-click ribbon interaction is distinct
 from directly invoking its registered callback methods.
 
-The latest unreleased patch passed real Word and PowerPoint runs with isolated
+The November 8–9 lifecycle checks recorded real Word and PowerPoint runs with isolated
 network/mount namespaces and path activation, including native PowerPoint window
 closure and natural process exit. Excel disconnected through COM in the current
 copied profile; the untouched published 0.3.1 DLL also failed its control run.

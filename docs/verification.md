@@ -1,6 +1,17 @@
-# 0.2.0 验证记录（含 0.1.0 历史） · 2026-10-14
+# TwoDrive Office 验证记录
 
-2026-11-07 Windows Microsoft Office 新候选的当前结果单独记录于 [MS Office 验证](msoffice.md#validation)。历史 Linux 插件结果不代表 Windows COM 注册、CFAPI 或真实云端已通过。 2026-11-08 隐藏 Word/Excel/PowerPoint 的真实定时保存再验证通过；文档保持打开时排他读取被拒，读取 oplock 可取得，但不能据此声称并发快照或云同步已通过。详见 MS Office 指南的打开文件边界。
+每节保留当时使用的编辑器版本、测试环境和结果。按要核对的行为选择记录。
+
+| 环境 | 验证入口 |
+| --- | --- |
+| LibreOffice / ONLYOFFICE | [真实编辑器与格式](#实际环境与测试) · [本地版本与挂载提交](#linux-queue) |
+| Microsoft Office on Wine / Soda | [PowerPoint 大文件与分片上传](#wine-powerpoint) · [连接重试](#wine-retry) |
+| 原生 Windows Office | [生成文档关闭后的云端读回](#windows-readback) · [首次安装与多文档状态](#windows-install) |
+| Craft 协议预览 | [宿主兼容性](#宿主兼容性) · [中断写入与恢复](#craft-recovery) |
+
+## 0.2.0 验证记录（含 0.1.0 历史） · 2026-10-14
+
+2026-11-07 Windows Microsoft Office 新候选的当前结果单独记录于 [MS Office 验证](https://github.com/LumiaBlack51/twodrive-office/blob/main/docs/msoffice.md#validation)。历史 Linux 插件结果不代表 Windows COM 注册、CFAPI 或真实云端已通过。 2026-11-08 隐藏 Word/Excel/PowerPoint 的真实定时保存再验证通过；文档保持打开时排他读取被拒，读取 oplock 可取得，但不能据此声称并发快照或云同步已通过。详见 MS Office 指南的打开文件边界。
 
 开发目录：`/home/lumia/workspace/Projects/codex/office-extension`。TwoDrive 源码只读回顾自 `/home/lumia/software/twodrive` 的 `dev` 分支；未修改、重启或重新配置真实 TwoDrive。
 
@@ -217,6 +228,8 @@ python3 tests/onlyoffice_integration.py --xvfb /absolute/path/to/Xvfb --format p
 
 本机先前安装的程序文件已与此次 CI 包的源码内容一致；ZIP 容器时间不同不等于程序不一致。没有再次安装或启动编辑器，也没有修改 TwoDrive。此前段落“尚未公开发布”保留为当时状态，由本补记更新。
 
+
+<a id="linux-queue"></a>
 
 ## 0.3.0：本地持久保存与定时挂载提交 · 2026-11-01
 
@@ -450,6 +463,8 @@ Word、PowerPoint 可在 BeforeClose 中完成快照和原生保存，现保留�
 
 复验入口为 `tests/wine_integration.py --mixed-edits`。使用 `--large-deck --host PowerPoint` 复验大包，用 `--host Word --word-compatibility 14 --first-quit` 复验复杂 Word 文档。Soda 的原生 Wayland 环境可指定 `--wayland-tools` 指向包含 `scripts/run-headless-wayland.sh` 的测试工具目录。已授权且能接受键盘输入的独立 PowerPoint 窗口可额外使用 `--measure-input`；该测试检查像素、每次保存的不同标记以及最后文档中的文字。硬件、测试环境和文件内容会影响结果。
 
+<a id="wine-powerpoint"></a>
+
 ## Soda PowerPoint 实际 147 页课件的后台保存与分片上传 · 2026-11-19
 
 从现有本地缓存复制 83,109,780 字节的 PPTX，包含 147 页和 201 个媒体条目。原件有独立的生产上传任务。以下编辑仅发生在副本上。使用上一节所列摘要的预览包 DLL 及随包 bridge，运行 Microsoft 365 PowerPoint 16.0、Soda v15、复制的 bottle、独立 Weston 显示、挂载检查开启。测试使用低优先级，与桌面共享主机。两轮均通过插件自动连接、正常宿主退出及源 bottle 注册表校验。
@@ -498,6 +513,8 @@ Word、PowerPoint 可在 BeforeClose 中完成快照和原生保存，现保留�
 审查发现原生文件已写入、桥接确认暂时失败时，旧 worker 会丢弃待确认句柄。修正后遇到传输错误会保留最新的已固定文件、摘要及令牌，并沿用退避；同一版本的成功回执可重放，目标指纹变化或版本前进会拒绝旧确认。增加丢回复的 COM worker 与桥接回归。
 
 最终组合使用 15 秒加速发布，在原生确认提交前及成功后各丢一次响应。适配器自动重试成功后才放行后续编辑。第一个本地恢复包 2.44 秒，回执扣住时二次修改 42 毫秒。三次原生保存及下一次修改 1.61–1.66 秒，最后关闭 4.33 秒，重开且验证全部标记 1.06 秒。接收端只有两次大文件上传，均为最初的正式文件身份，无远端改名、删除或临时内容上传。文件大小分别为 83,110,634 和 83,465,915 字节，合计 158.9 MiB；此外接收器故意丢弃一个 10 MiB 分片并返回 503，随后续传成功。重开约 10 秒后收到最终回执。释放隔离缓存再下载，最终 SHA-256 相同，201 个原始媒体成员逐一匹配，元数据和删除队列均为零。快速编辑轮峰值 RSS 依次为 PowerPoint 985、桥接 130、daemon 23 MiB。分块期间的 90 次 4 KiB 读取 P95 为 18.3 毫秒，最大 18.8 毫秒。相关主程序 PR 为 LumiaBlack51/twodrive#78。
+
+<a id="wine-retry"></a>
 
 ## Wine 保存连接在一分钟退避后反复断开 · 2026-11-23
 
@@ -566,6 +583,8 @@ Dot 对 PR #10 的 35accd5 提出两项 P1：恢复旧会话可能替换同一�
 发布前及追加提交后复查 Dot。已有两项 P1 继续作为回归边界；不能将旧提交的“无新增阻塞”套用为新插件审查结果。新提交的审查/CI 状态以 PR #10 最新记录为准。临时源码、Rust 目标/注册表副本、测试目录与旧 companion 发行制品在交付后清理；保留当前普通插件发行包、必要旧恢复程序及所有唯一恢复数据。
 
 
+<a id="craft-recovery"></a>
+
 ## Craft 普通插件 0.2.0-preview.2 · Dot P1 修复 · 2026-11-15
 
 Dot 对提交 `2444e57` 的[复审](https://github.com/LumiaBlack51/twodrive-office/pull/10#issuecomment-6893671128)确认一项 P1：暂停/关闭的最后采样失败后，final_capture 被提前清除，后续 tick 又会清掉错误；清单尚未写成的完整 .document 可能被目录清理误删。preview.1 已撤回为草稿档案，原标签不移动。
@@ -575,6 +594,8 @@ preview.2 只在采样成功后清除 final_capture，保留独立的采样错�
 新增 3 项回归（合计普通插件 25 项）：暂停和关闭两个分支均在 blob 写成、revision.json 写入失败后连续运行 5 次 tick，确认文件、错误、重试标记仍在，恢复写入后可正常提交和清理；失败后源出现更新版本并成功提交，旧的未登记完整文件经过 5 次 tick 仍保留；另存为停止采样后连续 tick 不清掉此前失败。干净源码全量 **98 项 Python、22 项 Node** 通过。固定上游三款 process/push/dialog 组件对完整 preview.2 ZIP 的往返验证通过，ZIP 自包含且可复现。仍未安装、未运行官方编辑器 UI、未测试真实挂载或云上传。
 
 临时依赖、构建目标、下载的上游模块和模拟文档再次按本仓库规则清理，旧版唯一恢复数据保持不变。后续 CI 和 Dot 复审状态见 PR #10 与发布验证摘要；旧版本的审查结论不代表新提交已获批准。
+
+<a id="windows-readback"></a>
 
 ## 2026-11-08 Microsoft Office 生成文档到真实云端
 
@@ -618,8 +639,10 @@ CI 补验：受保护组件的实际 COM 激活、空格路径、ACL 和他人�
 首轮在同一 CLR 中加载后立即删 DLL，因 Windows 映像锁而清理失败。激活改在
 独立隐藏子进程完成，退出后清理；不把夹具清理失败归为插件连接失败。
 
+<a id="windows-install"></a>
+
 ## Windows 预览：首次安装与多文档状态 · 2026-11-26
 
 机器级 COM 安装把 DLL 写入 Program Files，个人设置写入 LocalAppData。安装器现在单独创建个人设置目录。Windows CI 使用发布包中的安装入口，依次验证空目录首次安装、修改间隔后重装和卸载。测试在一次性 runner 上模拟 Office 位数和 CFAPI 身份，使用实际安装脚本、程序集、注册表和文件系统。
 
-Ribbon 按活动文档的会话读取保存状态。控制器回归覆盖同一轮中 A 保存失败、B 保存成功、切换查看两者、暂停 B 以及关闭 B 后清理其状态。运行结果见 [PR #7 的检查记录](https://github.com/LumiaBlack51/twodrive-office/pull/7/checks)。本轮未启动真实 Office，也未运行云端上传测试。
+Ribbon 按活动文档的会话读取保存状态。控制器回归覆盖同一轮中 A 保存失败、B 保存成功、切换查看两者、暂停 B 以及关闭 B 后清理其状态。提交 `9d9fdae` 的 [Windows 安装和保存回归](https://github.com/LumiaBlack51/twodrive-office/actions/runs/45798307406) 与 [Linux Office 检查](https://github.com/LumiaBlack51/twodrive-office/actions/runs/45798307523) 均通过。本轮使用测试文件，未启动真实 Office 或运行云端上传。
