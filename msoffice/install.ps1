@@ -73,6 +73,7 @@ try {
     }
     $assemblyName = [Reflection.AssemblyName]::GetAssemblyName($assemblyPath).FullName
     $configuration = @{ RootPath=$resolvedRoot; RootIdentity=$identity; IntervalSeconds=$IntervalSeconds } | ConvertTo-Json
+    [IO.Directory]::CreateDirectory($base) | Out-Null
     $tempSettings = Join-Path $base ('settings-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     [IO.File]::WriteAllText($tempSettings, $configuration, [Text.UTF8Encoding]::new($false))
     $settingsPath = Join-Path $base 'msoffice.json'

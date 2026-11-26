@@ -17,6 +17,9 @@ jobs:
       - name: Activate protected managed COM component without Office
         shell: powershell
         run: ./tests/msoffice/test-com-component.ps1
+      - name: Verify fresh machine installation and reinstallation
+        shell: powershell
+        run: ./tests/msoffice/test-machine-install.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: twodrive-msoffice-preview

@@ -104,7 +104,12 @@ namespace TwoDrive.Office
             try { if (controller != null) controller.Tick(Active(), DateTime.UtcNow, true); }
             catch (Exception) { }
         }
-        public string Status(object control) { return controller == null ? setupStatus : controller.Status; }
+        public string Status(object control)
+        {
+            if (controller == null) return setupStatus;
+            try { return controller.StatusFor(Active()); }
+            catch (Exception) { return SaveController.WaitingStatus; }
+        }
         public void RibbonLoaded(object value) { ribbon = value; }
         public string GetCustomUI(string ribbonId)
         {

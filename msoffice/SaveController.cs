@@ -25,6 +25,7 @@ namespace TwoDrive.Office
         sealed class Session
         {
             public string Path;
+            public string Status = WaitingStatus;
             public Stamp Expected;
             public DateTime Due;
             public bool Paused, Failed, Eligible;
@@ -33,13 +34,18 @@ namespace TwoDrive.Office
         readonly IRootGuard guard;
         readonly TimeSpan interval;
         bool saving;
-        public string Status { get; private set; }
+        internal const string WaitingStatus = "等待 TwoDrive 内已命名的文档";
         public SaveController(IRootGuard guard, int seconds)
         {
             if (seconds < 5 || seconds > 3600) throw new ArgumentOutOfRangeException("seconds");
             this.guard = guard;
             interval = TimeSpan.FromSeconds(seconds);
-            Status = "等待 TwoDrive 内已命名的文档";
+        }
+
+        public string StatusFor(IDocument document)
+        {
+            Session state;
+            return sessions.TryGetValue(document.Key, out state) ? state.Status : WaitingStatus;
         }
 
         public bool IsPaused(IDocument document)
@@ -66,7 +72,7 @@ namespace TwoDrive.Office
                 sessions.Add(document.Key, state);
             }
             state.Paused = paused;
-            Status = paused ? "此文档自动保存已暂停" : "此文档自动保存已开启";
+            state.Status = paused ? "此文档自动保存已暂停" : "此文档自动保存已开启";
         }
         public void ForgetExcept(HashSet<string> open)
         {
@@ -93,7 +99,7 @@ namespace TwoDrive.Office
                 if (state.Path != null && !String.Equals(state.Path, path, StringComparison.OrdinalIgnoreCase))
                 {
                     state.Paused = true;
-                    Status = "另存位置已变化；请重新打开文档后启用";
+                    state.Status = "另存位置已变化；请重新打开文档后启用";
                     return;
                 }
                 if (state.Path == null)
@@ -107,6 +113,8 @@ namespace TwoDrive.Office
                 {
                     state.Expected = stamp;
                     state.Due = now + interval;
+                    if (state.Failed)
+                        state.Status = "此文档当前没有待保存修改";
                     state.Failed = false;
                     return;
                 }
@@ -117,7 +125,7 @@ namespace TwoDrive.Office
                 if (!state.Eligible)
                 {
                     state.Due = now + interval;
-                    Status = "此文档暂不支持自动保存，请手动保存";
+                    state.Status = "此文档暂不支持自动保存，请手动保存";
                     return;
                 }
                 if (!state.Expected.Equals(stamp))
@@ -132,7 +140,7 @@ namespace TwoDrive.Office
                 state.Expected = Stamp.Read(path);
                 state.Due = now + interval;
                 state.Failed = false;
-                Status = "已保存到本地；云端上传由 TwoDrive 完成";
+                state.Status = "已保存到本地；云端上传由 TwoDrive 完成";
             }
             catch (Exception)
             {
@@ -143,8 +151,8 @@ namespace TwoDrive.Office
                 {
                     state.Failed = true;
                     state.Due = now + interval;
+                    state.Status = "自动保存未完成；修改仍在 Office 中，请检查连接或手动保存";
                 }
-                Status = "自动保存未完成；修改仍在 Office 中，请检查连接或手动保存";
             }
             finally { saving = false; }
         }

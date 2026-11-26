@@ -120,7 +120,7 @@ class HostSmoke
                     Check(!document.Saved, host + " edit was not dirty");
                     object previousAlerts = app.DisplayAlerts;
                     controller.Tick(document, now.AddSeconds(31), false);
-                    Check(document.Saved, host + " save not acknowledged: " + controller.Status);
+                    Check(document.Saved, host + " save not acknowledged: " + controller.StatusFor(document));
                     Check(Object.Equals(previousAlerts, (object)app.DisplayAlerts), host + " alerts were not restored");
                     string part = host == "Word" ? "word/document.xml" : host == "Excel" ? "xl/sharedStrings.xml" : "ppt/slides/slide1.xml";
                     Content(path, part, "TwoDriveNativeSaved");
