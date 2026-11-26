@@ -4,6 +4,8 @@ ONLYOFFICE Desktop Editors、LibreOffice 和 Wine/Soda Microsoft Office 的 TwoD
 
 源代码：[LumiaBlack51/twodrive-office](https://github.com/LumiaBlack51/twodrive-office)。安装包、校验值与验证摘要见 [v0.3.2 Preview Release](https://github.com/LumiaBlack51/twodrive-office/releases/tag/v0.3.2)。
 
+Artcraft 系列另有 TwoDrive 普通插件 0.2.0-preview.2，面向共同插件协议 2.2 的待合并提案。官方 WordCraft / GridCraft / DeckCraft 尚无相应宿主，因此本次只交付预览包，等官方支持后再安装；不改原生 AutoSave、不重新编译 Office、不新增启动器。插件提供应用内 TwoDrive 标签，自动同步磁盘上的已保存版本，不能导出未保存修改。构建、协议来源及边界见 [Artcraft 说明](docs/artcraft.md)。
+
 打开位于 TwoDrive 挂载目录内的文档后，会自动开启本地保存。修改先持久保存到挂载外的私有目录，默认每 180 秒将最新版本提交到 TwoDrive，关闭文档或点“立即保存”时立即提交。目录外或未命名文档默认关闭，用户手动开启后保存当前编辑内容的副本。默认副本目录是 `~/TwoDrive/OneDrive/Office AutoSave`，用户可以在开启/保存时选择 TwoDrive 内的其他目录。
 
 插件将频繁编辑合并为本地待同步版本，定时发布到挂载；TwoDrive 的 FUSE/后台服务负责上传。插件包只包含 Office 插件与桥接程序。本插件不会因空开文档而导出/提交；配套 [TwoDrive 0.2.22](https://github.com/LumiaBlack51/twodrive/releases/tag/v0.2.22-1) 另行修复未写入的可写句柄在关闭时排队上传。界面中的“已本地保存”不代表 OneDrive 上传完成。此项目没有修改 TwoDrive 本体、登录方式或后台同步服务。
