@@ -1,5 +1,7 @@
 # 0.2.0 验证记录（含 0.1.0 历史） · 2026-10-14
 
+2026-11-07 Windows Microsoft Office 新候选的当前结果单独记录于 [MS Office 验证](msoffice.md#validation)。历史 Linux 插件结果不代表 Windows COM 注册、CFAPI 或真实云端已通过。 2026-11-08 隐藏 Word/Excel/PowerPoint 的真实定时保存再验证通过；文档保持打开时排他读取被拒，读取 oplock 可取得，但不能据此声称并发快照或云同步已通过。详见 MS Office 指南的打开文件边界。
+
 开发目录：`/home/lumia/workspace/Projects/codex/office-extension`。TwoDrive 源码只读回顾自 `/home/lumia/software/twodrive` 的 `dev` 分支；未修改、重启或重新配置真实 TwoDrive。
 
 ## 实际环境与测试
@@ -573,3 +575,51 @@ preview.2 只在采样成功后清除 final_capture，保留独立的采样错�
 新增 3 项回归（合计普通插件 25 项）：暂停和关闭两个分支均在 blob 写成、revision.json 写入失败后连续运行 5 次 tick，确认文件、错误、重试标记仍在，恢复写入后可正常提交和清理；失败后源出现更新版本并成功提交，旧的未登记完整文件经过 5 次 tick 仍保留；另存为停止采样后连续 tick 不清掉此前失败。干净源码全量 **98 项 Python、22 项 Node** 通过。固定上游三款 process/push/dialog 组件对完整 preview.2 ZIP 的往返验证通过，ZIP 自包含且可复现。仍未安装、未运行官方编辑器 UI、未测试真实挂载或云上传。
 
 临时依赖、构建目标、下载的上游模块和模拟文档再次按本仓库规则清理，旧版唯一恢复数据保持不变。后续 CI 和 Dot 复审状态见 PR #10 与发布验证摘要；旧版本的审查结论不代表新提交已获批准。
+
+## 2026-11-08 Microsoft Office 生成文档到真实云端
+
+Word/Excel/PowerPoint 的实际 STA 定时保存结果，经自有 CFAPI 根完整快照、个人 OneDrive
+条件版本上传、完整云端回读及原生同步确认通过。捕获前关闭了测试自己的编辑器；未安装
+COM/功能区、未使用用户文档，也不将此结果算作常驻协调器或原目录接管。全部生成范围
+已退役，详见 MS Office 指南的流水线验证。另修正测试实例所有权退出保护、安装器拒绝
+生成根的检查与描述；11 项保存控制器检查和测试宿主编译通过。
+
+
+## 2026-11-09 当前用户真实 COM 部署与接管验收
+
+TwoDrive Development 的 Windows CFAPI 根已接管原个人目录，学校同步保留。
+插件安装到当前用户的 30 秒配置，根的注册身份已校验。首次 HKCU COM 激活和
+Word 连接均报告 0x80070002；完整 RegAsm 用户注册与版本键仍失败。该机
+EnableLUA=0 且当前进程为管理员，符合微软所述忽略每用户 COM 注册的环境。
+因此增加显式 `-MachineCom`：组件进入受保护 Program Files，只有组件 CLSID/
+ProgID 使用 HKLM，Office 启用和根配置仍为当前用户。安装器拒绝低权限可写
+组件/父路径、链接和他人注册；保留现有系统安全配置。
+
+受保护组件首次仍在无预加载进程失败。CodeBase 从 escaped AbsoluteUri 改为
+CLR/RegAsm 的 Assembly.CodeBase 格式后，新进程实际激活成功，程序集位置
+确认在 Program Files。回归使用带空格的受保护路径，验证实际 COM 激活、
+不安全 ACL 拒绝、不同组件卸载拒绝及重注册，CI 仅在一次性 hosted VM 执行。
+
+重装另暴露 Windows PowerShell 将 File.Replace 第三参数 $null 绑定为空字符串，
+导致已有设置替换报路径错误；改为 NullString.Value 后，实际重装成功到达 COM
+注册。ACL 校验改用 SID 规则，避免机器现有无法映射的主体名称导致检查失败。
+
+实际 Word/Excel/PowerPoint 当前用户注册加载均连接成功，验证根身份，未打开/
+保存任何用户文档，也未启动可见编辑器。验证脚本仅取得无文档隐藏实例，显式
+断开测试连接后关闭并恢复 LoadBehavior=3；异常实例只按本次 PID/创建时间/
+无窗口证据清理。早期脚本缺少外层错误捕获和退出等待，已补明确阶段与所有权。
+此前生成文档的真实 STA 定时保存和条件云端闭环仍是单独证据，不把本次 COM
+加载检查冒称新做了用户文档保存。已知边界：严格原生捕获在编辑器持续占用时
+推迟云端提交；本地定时保存已验证，完整后台捕获以文档关闭为前提。
+
+参考：[HKCR 与关闭 UAC 时的 COM 配置](https://learn.microsoft.com/en-us/windows/win32/sysinfo/hkey-classes-root-key)。
+
+CI 补验：受保护组件的实际 COM 激活、空格路径、ACL 和他人卸载拒绝均通过；
+首轮在同一 CLR 中加载后立即删 DLL，因 Windows 映像锁而清理失败。激活改在
+独立隐藏子进程完成，退出后清理；不把夹具清理失败归为插件连接失败。
+
+## Windows 预览：首次安装与多文档状态 · 2026-11-26
+
+机器级 COM 安装把 DLL 写入 Program Files，个人设置写入 LocalAppData。安装器现在单独创建个人设置目录。Windows CI 使用发布包中的安装入口，依次验证空目录首次安装、修改间隔后重装和卸载。测试在一次性 runner 上模拟 Office 位数和 CFAPI 身份，使用实际安装脚本、程序集、注册表和文件系统。
+
+Ribbon 按活动文档的会话读取保存状态。控制器回归覆盖同一轮中 A 保存失败、B 保存成功、切换查看两者、暂停 B 以及关闭 B 后清理其状态。运行结果见 [PR #7 的检查记录](https://github.com/LumiaBlack51/twodrive-office/pull/7/checks)。本轮未启动真实 Office，也未运行云端上传测试。
