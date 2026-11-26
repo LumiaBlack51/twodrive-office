@@ -1,12 +1,6 @@
 # Microsoft Office Windows preview
 
-Word / Excel / PowerPoint COM add-in candidate, assembly 0.4.0.0. This is separate
-from the existing 0.3.0 LibreOffice/ONLYOFFICE packages.
-
-**Not yet a completed OneDrive takeover.** Installation requires a production
-TwoDrive Development CFAPI root with a verified account-bound identity. Current
-dev's generated CFAPI fixture is deliberately rejected. The pending native sync
-and migration implementation must be reviewed and validated before installation.
+**Source preview · assembly 0.4.0.0.** This native Windows add-in requires a production TwoDrive Development CFAPI root bound to your account. The installer checks the root identity before changing registration. Build the add-in on Windows with the steps below. The Linux release assets cover other editors.
 
 The add-in saves existing named DOCX/XLSX/PPTX documents inside its configured root
 using each editor's own Save operation, normally every 30 seconds. It runs on the
@@ -39,17 +33,14 @@ powershell -NoProfile -File dist/msoffice/install.ps1 -Root C:\TwoDrive\OneDrive
 powershell -NoProfile -File dist/msoffice/install.ps1 -Uninstall
 ```
 
-Settings and installed binaries live under `%LOCALAPPDATA%\TwoDrive-Office`.
+The default installation keeps settings and binaries under `%LOCALAPPDATA%\TwoDrive-Office`. With `-MachineCom`, the DLL goes under Program Files while settings stay in LocalAppData.
 The settings bind the configured root identity; an account/root replacement is
 not silently accepted. The installer does not launch an editor. Development tests
 do not register the add-in or change the normal Office profile.
 
 ## Validation
 
-- Eleven controller scenarios pass using generated files: clean open, interval,
-  repeated root validation, disconnect, persistent pause, native failure/cancel,
-  reentrancy, external-file conflict, Save As retargeting and unsupported format.
-- Existing Linux Python tests: 40 passed; ONLYOFFICE Node tests: 21 passed.
+- [Windows CI](https://github.com/LumiaBlack51/twodrive-office/actions/runs/45798307406) builds the add-in, checks its COM activation, and runs the packaged installer against a fresh profile and a reinstall with a different interval. The installer test supplies simulated Office discovery and CFAPI identity. Controller tests cover the save interval, refusal and retry, document switching and a failed save followed by success in another document.
 - `tests/msoffice/run-host-smoke.ps1`: hidden, newly created Word/Excel/PowerPoint
   instances saved generated documents via the actual Office adapter. Dirty-state
   acknowledgement, persisted OOXML content and DisplayAlerts restoration passed
@@ -60,12 +51,7 @@ do not register the add-in or change the normal Office profile.
   directory file ID; junctions and unsupported reparse points are rejected without
   following them. Owned instances exited and generated files were removed; the
   fixture owner confirmed unregistration and removed its empty root.
-- Not yet validated: registered COM loading/ribbon interaction, a production
-  account's native root, real cloud upload, x86
-  Office, other Office versions, large/complex document corpus and crash recovery.
-  Host smoke attaches the real host loop with an internal generated-root guard;
-  it does not install COM registration or bypass the normal connection's CFAPI
-  validation. Hosted CI compiles/tests without an installed Office license.
+- A separate deployment check verified registered COM connections in Word, Excel and PowerPoint. Generated documents also passed cloud readback after all three hosts closed. Open-editor cloud upload, ribbon clicks, x86 Office and broader document compatibility remain unverified. [Deployment and readback records](verification.md#windows-readback)
 
 The optional `tests/msoffice/run-cfapi-smoke.ps1 -FixtureOwner ABSOLUTE_EXE`
 uses TwoDrive's `experiments/windows-cfapi/examples/office_fixture.rs` built with
