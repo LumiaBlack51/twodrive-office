@@ -111,6 +111,8 @@ relative and ambiguous case-folded paths are refused. This also avoids the insta
 Office/AppV process's failure to use Wine's Unix-name API, which worked in a standalone
 Wine probe but failed inside Office.
 
+<a id="cpak-isolated-networking-unreleased-fix"></a>
+
 ### cpak isolated networking
 
 The ordinary loopback installation requires Office to reach the host's
