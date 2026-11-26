@@ -144,7 +144,7 @@ def main():
     parser.add_argument('--report', type=Path)
     parser.add_argument('--sandbox', action='store_true', help='Real isolated net/mount namespace, directory grants and systemd path activation')
     parser.add_argument('--window-close', action='store_true', help='Close the verified private native window instead of calling Quit')
-    parser.add_argument('--no-idle-reopen', action='store_true', help='Skip the separate empty-editor 35-second idle phase')
+    parser.add_argument('--no-idle-reopen', action='store_true', help='Skip the separate empty-editor 100-second idle phase')
     parser.add_argument('--ribbon-image', type=Path, help='Capture the verified private display for startup ribbon inspection')
     parser.add_argument('--first-quit', action='store_true', help='Word exits on the first Quit request with unsaved edits and no second close')
     parser.add_argument('--word-compatibility', type=int, choices=(12, 14, 15),
@@ -302,6 +302,7 @@ def run(args):
             if args.sandbox:
                 if not args.no_idle_reopen:
                     env['TWODRIVE_TEST_IDLE_REOPEN'] = '1'
+                    office_env['TWODRIVE_TEST_IDLE_REOPEN'] = '1'
                 script = """
 import pathlib,subprocess,sys
 subprocess.run(['mount','--make-rprivate','/'],check=True)
@@ -348,6 +349,8 @@ sys.stdin.read()
                     process = subprocess.Popen(command, env=office_env if weston else env,
                                                start_new_session=True, stdout=log, stderr=subprocess.STDOUT)
                     deadline, verified = time.monotonic() + (270 if args.large_deck else 110), False
+                    if namespace is not None and not args.no_idle_reopen:
+                        deadline += 100
                     while process.poll() is None and time.monotonic() < deadline:
                         if (directory / 'host.ready').exists() and not (directory / 'allow-host').exists():
                             verify_editor_environment(prefix, display, root / 'config', namespace, bool(weston))

@@ -11,7 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from twodrive_office.bridge import Bridge, make_server
 from twodrive_office.policy import SaveError, Settings
@@ -50,6 +50,32 @@ class GrantMappingTests(unittest.TestCase):
 
 
 class NamespaceRelayTests(unittest.TestCase):
+    def test_relay_outlasts_backed_off_office_retries_then_exits(self):
+        # A 60-second retry runs on the next Office timer tick. Exercise both
+        # the first connection after wakeup and a subsequent backed-off request.
+        elapsed = 0
+        attempts = [61, 122]
+
+        def accept():
+            nonlocal elapsed
+            elapsed += 1
+            self.assertLess(elapsed, 300, "Unused relay should exit")
+            if attempts and elapsed == attempts[0]:
+                attempts.pop(0)
+                return Mock(), None
+            raise socket.timeout
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, XDG_RUNTIME_DIR=directory), \
+                patch("twodrive_office.wine_namespace.namespace_listener") as listen, \
+                patch("twodrive_office.wine_namespace.time.monotonic", side_effect=lambda: elapsed), \
+                patch("twodrive_office.wine_namespace.concurrent.futures.ThreadPoolExecutor") as pool:
+            listen.return_value.__enter__.return_value.accept.side_effect = accept
+            pool.return_value.__enter__.return_value.submit.return_value.done.return_value = True
+            with open(os.devnull, "wb") as sink:
+                relay(os.getpid(), 19836, os.dup(sink.fileno()))
+            self.assertEqual(attempts, [])
+            self.assertFalse(list(Path(directory).rglob("wine-*.lock")))
+
     def test_real_namespace_idle_relay_exits_while_container_stays_alive(self):
         with tempfile.TemporaryDirectory(prefix='twodrive-idle-relay-test-') as directory:
             root = Path(directory)
