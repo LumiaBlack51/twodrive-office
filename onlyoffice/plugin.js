@@ -60,7 +60,23 @@
             signal: AbortSignal.timeout(path.startsWith("/pick-") ? 185000 : 60000)
         });
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "本地服务连接失败");
+        if (!response.ok) {
+            // A throttled/suspended editor can outlive an idle bridge. Reopen
+            // through the normal safety checks; pending revisions block this
+            // rather than letting an old model overwrite recovery data.
+            if (data.error === "session_closed" && session && path.startsWith("/sessions/" + session.session_id)) {
+                const old = session;
+                engine.stop();
+                session = null;
+                lockInputs(false);
+                $("enabled").checked = false;
+                if (!disposed && sourcePath(window.parent.AscDesktopEditor) === old.source_path) {
+                    $("enabled").checked = true;
+                    await toggle();
+                }
+            }
+            throw new Error(data.error || "本地服务连接失败");
+        }
         return data;
     }
     function jsonPost(path, data) {
@@ -282,13 +298,13 @@
         polling = setInterval(async () => {
             if (!engine.enabled || engine.busy || engine.dueAt !== null) return;
             changed();
-            if (!session || !locallySaved || engine.dueAt !== null) return;
+            if (!session || engine.dueAt !== null) return;
             const current = session;
             try {
                 const result = await request("/sessions/" + current.session_id);
                 if (session !== current || engine.busy || engine.dueAt !== null) return;
                 if (result.sync_error) report("本地版本已保留；提交 TwoDrive 失败：" + result.sync_error);
-                else if (result.cloud_status === "managed_by_twodrive") {
+                else if (locallySaved && result.cloud_status === "managed_by_twodrive") {
                     $("target").textContent = "TwoDrive 目标：" + current.target;
                     report("已提交 TwoDrive，等待云端同步" + (current.in_place ? "" : "；原文档的保存状态未改变"));
                 }

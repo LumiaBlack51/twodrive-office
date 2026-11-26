@@ -65,6 +65,29 @@ class OfficePresence:
         return self.present
 
 
+def serve_on_demand(server, idle_timeout, *, all_office=None):
+    """Only active requests/heartbeats retain the bridge, never editor PIDs."""
+    all_office = all_office if all_office is not None else OfficePresence(names=ALL_EDITORS)
+    bridge = server.bridge
+    server.timeout = 1
+    while True:
+        server.handle_request()
+        bridge.local_saves.tick()
+        if not server.activity.idle(idle_timeout):
+            continue
+        for key in list(bridge.sessions):
+            bridge.close(key)
+        if not all_office.running():
+            bridge.local_saves.allow_recovery()
+            bridge.local_saves.tick()
+        # Pending data is already durable. Offline/conflicted/damaged revisions
+        # must survive exit, rather than keeping a retry loop alive indefinitely.
+        if bridge.local_saves.pending():
+            print("本地待同步版本已保留；下次连接或 recover 时重试", flush=True)
+        print("桥接空闲，按需退出", flush=True)
+        return
+
+
 def activation_socket(port: int):
     """Use the single loopback listener passed by systemd, or bind normally."""
     count = os.environ.pop("LISTEN_FDS", None)

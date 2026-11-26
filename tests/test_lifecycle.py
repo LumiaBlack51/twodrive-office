@@ -1,19 +1,132 @@
 import os
+import io
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 import urllib.error
 import urllib.request
+import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from twodrive_office.bridge import Bridge, make_server
-from twodrive_office.lifecycle import Activity, OfficePresence, activation_socket
+from twodrive_office.lifecycle import Activity, OfficePresence, activation_socket, serve_on_demand
 from twodrive_office.policy import SaveError, Settings
 
 
+def document(text):
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("word/document.xml", "<document>" + text + "</document>")
+    return output.getvalue()
+
+
 class LifecycleTests(unittest.TestCase):
+    def test_idle_exit_ignores_orphaned_editor_and_preserves_native_pending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = document("original")
+            source = root / "source.docx"; source.write_bytes(original)
+            settings = Settings(root, root / "copies", require_mount=False, bridge_token="t" * 48)
+            bridge = Bridge(settings, state_root=root / "state")
+            key = bridge.create({"source_path": str(source), "confirm_source": True,
+                                 "native_publish": True})["session_id"]
+            record = bridge.sessions[key].local
+            content = document("unsynced native revision")
+            record.stage(content)
+            blob, manifest = record.blob, record.manifest
+            server = Mock(bridge=bridge, activity=Activity(lambda: 100))
+            server.activity.last_request = 0
+            # The residual process must prevent unsafe native recovery, but
+            # must never prevent the bridge itself from exiting.
+            presence = Mock(); presence.running.return_value = True
+            with patch("twodrive_office.local_save.atomic_write", side_effect=AssertionError("No native publication")):
+                with patch("sys.stdout", new=io.StringIO()):
+                    serve_on_demand(server, 30, all_office=presence)
+            server.handle_request.assert_called_once()
+            self.assertFalse(bridge.sessions)
+            self.assertTrue(bridge.local_saves.pending())
+            self.assertEqual(source.read_bytes(), original)
+            bridge.local_saves.shutdown()
+            self.assertEqual(blob.read_bytes(), content)
+            self.assertTrue(manifest.exists())
+            recovered = Bridge(settings, state_root=root / "state")
+            try:
+                self.assertTrue(recovered.local_saves.pending())
+            finally:
+                recovered.local_saves.shutdown()
+
+    def test_idle_exit_attempts_safe_recovery_once_and_keeps_conflict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.docx"; source.write_bytes(document("original"))
+            settings = Settings(root, root / "copies", require_mount=False, bridge_token="t" * 48)
+            bridge = Bridge(settings, state_root=root / "state")
+            self.addCleanup(bridge.local_saves.shutdown)
+            key = bridge.create({"source_path": str(source), "confirm_source": True})["session_id"]
+            record = bridge.sessions[key].local
+            record.stage(b"pending revision")
+            source.write_bytes(b"external change")
+            server = Mock(bridge=bridge, activity=Activity(lambda: 100))
+            server.activity.last_request = 0
+            presence = Mock(); presence.running.return_value = False
+            with patch("sys.stdout", new=io.StringIO()):
+                serve_on_demand(server, 30, all_office=presence)
+            server.handle_request.assert_called_once()
+            self.assertTrue(bridge.local_saves.pending())
+            self.assertEqual(record.blob.read_bytes(), b"pending revision")
+            self.assertEqual(source.read_bytes(), b"external change")
+
+    def test_running_request_finishes_before_idle_exit(self):
+        bridge = Mock(sessions={})
+        bridge.local_saves.pending.return_value = False
+        server = Mock(bridge=bridge, activity=Activity(lambda: 100))
+        server.activity.last_request = 0
+        server.activity.begin()
+        calls = []
+        def request():
+            calls.append(True)
+            if len(calls) == 2:
+                server.activity.end()
+        server.handle_request.side_effect = request
+        presence = Mock(); presence.running.return_value = True
+        with patch("sys.stdout", new=io.StringIO()):
+            serve_on_demand(server, 30, all_office=presence)
+        self.assertEqual(len(calls), 2)
+
+    def test_real_cli_exits_without_waiting_for_editor_pids(self):
+        with tempfile.TemporaryDirectory(prefix="twodrive-lifetime-test-") as directory:
+            root = Path(directory)
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", 0))
+                port = listener.getsockname()[1]
+            config = root / "config.json"
+            Settings(root, root / "copies", require_mount=False,
+                     bridge_port=port, bridge_token="t" * 48).save(config)
+            environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", XDG_STATE_HOME=str(root / "state"))
+            command = [sys.executable, "-m", "twodrive_office.cli", "--config", str(config), "serve"]
+            child = subprocess.Popen(command + ["--idle-timeout", "0.1"], env=environment,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                     start_new_session=True)
+            try:
+                output, errors = child.communicate(timeout=5)
+                self.assertEqual(child.returncode, 0, errors)
+                self.assertIn("桥接空闲，按需退出", output)
+            finally:
+                if child.poll() is None:
+                    import signal
+                    os.killpg(child.pid, signal.SIGTERM); child.wait(timeout=5)
+                child.stdout.close(); child.stderr.close()
+            for invalid in ("0", "-1", "nan", "inf"):
+                result = subprocess.run(command + ["--idle-timeout", invalid], env=environment,
+                                        capture_output=True, text=True, timeout=5)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("有限秒数", result.stderr)
+
     def test_busy_save_cannot_expire_and_authenticated_activity_resets_deadline(self):
         now = [0]
         activity = Activity(lambda: now[0])
@@ -28,7 +141,7 @@ class LifecycleTests(unittest.TestCase):
         activity.touch()
         self.assertFalse(activity.idle(30))
 
-    def test_presence_only_retains_our_onlyoffice_and_caches_scan(self):
+    def test_recovery_presence_recognizes_owned_editors_and_caches_scan(self):
         now = [0]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -53,7 +166,9 @@ class LifecycleTests(unittest.TestCase):
             listener.bind(("127.0.0.1", 0))
             listener.listen()
             port = listener.getsockname()[1]
-            server = make_server(Bridge(settings), listener=listener)
+            bridge = Bridge(settings, state_root=mount / "state")
+            self.addCleanup(bridge.local_saves.shutdown)
+            server = make_server(bridge, listener=listener)
             self.addCleanup(server.server_close)
             self.addCleanup(server.shutdown)
             threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -84,7 +199,7 @@ if __name__ == "__main__":
 
 
 class WinePresenceTests(unittest.TestCase):
-    def test_wine_office_hosts_keep_bridge_alive_until_their_process_exits(self):
+    def test_wine_office_presence_blocks_recovery_until_their_process_exits(self):
         from twodrive_office.lifecycle import OfficePresence
         import tempfile
         for name in ('WINWORD.EXE', 'EXCEL.EXE', 'POWERPNT.EXE'):

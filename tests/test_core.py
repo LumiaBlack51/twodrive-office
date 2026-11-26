@@ -230,6 +230,29 @@ class BridgeTests(unittest.TestCase):
         bridge.save(session["session_id"], exported("edited", "2026-10-18T10:00:10Z"))
         self.assertNotEqual(target.read_bytes(), before[0])
 
+    def test_powerpoint_idle_export_keeps_the_existing_recovery_blob(self):
+        bridge = Bridge(self.settings)
+        self.addCleanup(bridge.local_saves.shutdown)
+        key = bridge.create({"document_id": "idle-powerpoint", "extension": "pptx"})["session_id"]
+
+        def snapshot(revision):
+            stream = io.BytesIO()
+            with zipfile.ZipFile(stream, "w") as archive:
+                archive.writestr("[Content_Types].xml", "<Types/>")
+                archive.writestr("ppt/presentation.xml", "<presentation/>")
+                archive.writestr("ppt/slides/slide1.xml", "<slide>unchanged</slide>")
+                archive.writestr("docProps/core.xml", (
+                    '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties">'
+                    f"<cp:revision>{revision}</cp:revision></cp:coreProperties>"
+                ))
+            return stream.getvalue()
+
+        bridge.save(key, snapshot(11), revision=1, defer=True)
+        recovery = bridge.sessions[key].local
+        first = recovery.blob
+        bridge.save(key, snapshot(12), revision=2, defer=True)
+        self.assertEqual(recovery.blob, first, "Idle export replaced the complete recovery file")
+
     def test_identical_native_model_with_new_transport_revision_does_not_rewrite(self):
         bridge = Bridge(self.settings)
         session = bridge.create({"title": "No-op", "document_id": "noop", "extension": "docx"})
